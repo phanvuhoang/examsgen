@@ -12,6 +12,7 @@ class MCQGenerateRequest(BaseModel):
     topics: Optional[list[str]] = None
     exam_session: str = "Jun2026"
     difficulty: str = "standard"
+    model_tier: str = "fast"   # fast=sonnet, strong=opus
 
 
 class ScenarioGenerateRequest(BaseModel):
@@ -20,6 +21,7 @@ class ScenarioGenerateRequest(BaseModel):
     marks: int = 10
     exam_session: str = "Jun2026"
     scenario_industry: Optional[str] = None
+    model_tier: str = "strong"  # default opus for scenario
 
 
 class LongformGenerateRequest(BaseModel):
@@ -27,6 +29,7 @@ class LongformGenerateRequest(BaseModel):
     sac_thue: str
     marks: int = 15
     exam_session: str = "Jun2026"
+    model_tier: str = "strong"  # default opus for longform
 
 
 class RegulationUpload(BaseModel):

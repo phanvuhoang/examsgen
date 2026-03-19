@@ -12,11 +12,12 @@ export default function Generate() {
   const [type, setType] = useState(searchParams.get('type') || '')
   const [sac_thue, setSacThue] = useState(searchParams.get('sac_thue') || 'CIT')
   const [questionNumber, setQuestionNumber] = useState(searchParams.get('question_number') || 'Q1')
-  const [count, setCount] = useState(5)
+  const [count, setCount] = useState(3)
   const [topics, setTopics] = useState('')
   const [examSession, setExamSession] = useState('Jun2026')
   const [industry, setIndustry] = useState('')
   const [difficulty, setDifficulty] = useState('standard')
+  const [modelTier, setModelTier] = useState('fast')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -46,6 +47,7 @@ export default function Generate() {
           exam_session: examSession,
           topics: topics ? topics.split(',').map((t) => t.trim()) : null,
           difficulty,
+          model_tier: modelTier,
         })
       } else if (type === 'scenario') {
         data = await api.generateScenario({
@@ -54,6 +56,7 @@ export default function Generate() {
           marks: 10,
           exam_session: examSession,
           scenario_industry: industry || null,
+          model_tier: modelTier,
         })
       } else if (type === 'longform') {
         data = await api.generateLongform({
@@ -61,6 +64,7 @@ export default function Generate() {
           sac_thue: QUESTION_MAP[questionNumber] || sac_thue,
           marks: 15,
           exam_session: examSession,
+          model_tier: modelTier,
         })
       }
       setResult(data)
@@ -149,6 +153,14 @@ export default function Generate() {
                     className="w-full border rounded-lg px-3 py-2">
                     <option value="standard">Standard</option>
                     <option value="hard">Hard</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">AI Model</label>
+                  <select value={modelTier} onChange={(e) => setModelTier(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2">
+                    <option value="fast">Sonnet — faster</option>
+                    <option value="strong">Opus — best quality</option>
                   </select>
                 </div>
               </>

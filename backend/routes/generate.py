@@ -78,7 +78,7 @@ def generate_mcq(req: MCQGenerateRequest):
             topics_instruction=topics_instruction,
         )
 
-        result = call_ai(prompt, model_tier="fast", system_prompt=MCQ_SYSTEM)
+        result = call_ai(prompt, model_tier=req.model_tier, system_prompt=MCQ_SYSTEM)
         content_json = parse_ai_json(result["content"])
         content_html = render_question_html(content_json)
         duration_ms = int((time.time() - start) * 1000)
@@ -130,7 +130,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             question_type="SCENARIO_10",
         )
 
-        result = call_ai(prompt, model_tier="strong", system_prompt=SCENARIO_SYSTEM)
+        result = call_ai(prompt, model_tier=req.model_tier, system_prompt=SCENARIO_SYSTEM)
         content_json = parse_ai_json(result["content"])
         content_html = render_question_html(content_json)
         duration_ms = int((time.time() - start) * 1000)
@@ -177,7 +177,7 @@ def generate_longform(req: LongformGenerateRequest):
             sample=ctx["sample"],
         )
 
-        result = call_ai(prompt, model_tier="strong", system_prompt=LONGFORM_SYSTEM)
+        result = call_ai(prompt, model_tier=req.model_tier, system_prompt=LONGFORM_SYSTEM)
         content_json = parse_ai_json(result["content"])
         content_html = render_question_html(content_json)
         duration_ms = int((time.time() - start) * 1000)
