@@ -8,7 +8,7 @@ class LoginRequest(BaseModel):
 
 class MCQGenerateRequest(BaseModel):
     sac_thue: str
-    count: int = 5
+    count: int = 3
     topics: Optional[list[str]] = None
     exam_session: str = "Jun2026"
     difficulty: str = "standard"

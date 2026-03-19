@@ -7,8 +7,8 @@ REQUIREMENTS:
 - 4 options A/B/C/D, one correct marked with "is_key": true
 - Scenario-based with specific VND amounts
 - Requires multi-step calculation (not just recall)
-- Distractors = specific, plausible student mistakes (wrong rate / wrong time apportionment / wrong base)
-- Each option must include: text, calculation working, explanation citing specific article/decree
+- Distractors = specific, plausible student mistakes
+- Keep calculation and explanation CONCISE (max 1-2 sentences each)
 
 TAX RATES:
 {tax_rates}
@@ -19,12 +19,9 @@ SYLLABUS SCOPE:
 REGULATIONS:
 {regulations}
 
-SAMPLE FORMAT (follow EXACTLY):
-{sample}
-
 {topics_instruction}
 
-Return ONLY valid JSON in this exact format:
+Return ONLY valid JSON, no markdown, no extra text:
 {{
   "type": "MCQ",
   "sac_thue": "{sac_thue}",
@@ -33,20 +30,20 @@ Return ONLY valid JSON in this exact format:
     {{
       "number": 1,
       "marks": 2,
-      "scenario": "On 1 January 2026, ...",
+      "scenario": "Brief scenario max 3 sentences.",
       "question": "What is...?",
       "options": {{
-        "A": {{"text": "VND X", "calculation": "...", "explanation": "...", "is_key": false}},
-        "B": {{"text": "VND Y", "calculation": "...", "explanation": "...", "is_key": true}},
-        "C": {{"text": "VND Z", "calculation": "...", "explanation": "...", "is_key": false}},
-        "D": {{"text": "VND W", "calculation": "...", "explanation": "...", "is_key": false}}
+        "A": {{"text": "VND X million", "calculation": "formula = result", "explanation": "Wrong because...", "is_key": false}},
+        "B": {{"text": "VND Y million", "calculation": "formula = result", "explanation": "Correct per Article X.", "is_key": true}},
+        "C": {{"text": "VND Z million", "calculation": "formula = result", "explanation": "Wrong because...", "is_key": false}},
+        "D": {{"text": "VND W million", "calculation": "formula = result", "explanation": "Wrong because...", "is_key": false}}
       }},
-      "regulation_refs": ["Article X, Law Y"]
+      "regulation_refs": ["Article X, Decree Y"]
     }}
   ]
 }}
 
-Generate {count} NEW MCQs. Different scenarios, different companies."""
+Generate {count} NEW MCQs covering different topics and company scenarios."""
 
 SCENARIO_SYSTEM = "You are a senior ACCA TX(VNM) examiner. Generate exam-standard scenario questions."
 
