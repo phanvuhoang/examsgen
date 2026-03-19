@@ -18,6 +18,10 @@ export default function Generate() {
   const [industry, setIndustry] = useState('')
   const [difficulty, setDifficulty] = useState('standard')
   const [modelTier, setModelTier] = useState('fast')
+  const [showCustom, setShowCustom] = useState(false)
+  const [referenceId, setReferenceId] = useState('')
+  const [customInstructions, setCustomInstructions] = useState('')
+  const [referenceOptions, setReferenceOptions] = useState([])
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -34,6 +38,14 @@ export default function Generate() {
     }
   }, [searchParams])
 
+  useEffect(() => {
+    if (type && sac_thue) {
+      api.getQuestionsForReference({ type, sac_thue })
+        .then(setReferenceOptions)
+        .catch(() => setReferenceOptions([]))
+    }
+  }, [type, sac_thue])
+
   const handleGenerate = async () => {
     setLoading(true)
     setError('')
@@ -48,6 +60,8 @@ export default function Generate() {
           topics: topics ? topics.split(',').map((t) => t.trim()) : null,
           difficulty,
           model_tier: modelTier,
+          reference_question_id: referenceId ? parseInt(referenceId) : null,
+          custom_instructions: customInstructions || null,
         })
       } else if (type === 'scenario') {
         data = await api.generateScenario({
@@ -57,6 +71,8 @@ export default function Generate() {
           exam_session: examSession,
           scenario_industry: industry || null,
           model_tier: modelTier,
+          reference_question_id: referenceId ? parseInt(referenceId) : null,
+          custom_instructions: customInstructions || null,
         })
       } else if (type === 'longform') {
         data = await api.generateLongform({
@@ -65,6 +81,8 @@ export default function Generate() {
           marks: 15,
           exam_session: examSession,
           model_tier: modelTier,
+          reference_question_id: referenceId ? parseInt(referenceId) : null,
+          custom_instructions: customInstructions || null,
         })
       }
       setResult(data)
@@ -207,6 +225,58 @@ export default function Generate() {
               <input value={examSession} onChange={(e) => setExamSession(e.target.value)}
                 className="w-full border rounded-lg px-3 py-2" />
             </div>
+          </div>
+
+          {/* Custom Instructions */}
+          <div className="border-t pt-4 mt-4">
+            <button
+              type="button"
+              onClick={() => setShowCustom(!showCustom)}
+              className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900"
+            >
+              <span>{showCustom ? '\u25BC' : '\u25B6'}</span>
+              Custom Instructions (optional)
+            </button>
+
+            {showCustom && (
+              <div className="mt-3 space-y-4">
+                {/* Section A: Pick from bank */}
+                {referenceOptions.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Base on question from bank
+                    </label>
+                    <select
+                      value={referenceId}
+                      onChange={(e) => setReferenceId(e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">— None —</option>
+                      {referenceOptions.map((q) => (
+                        <option key={q.id} value={q.id}>{q.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Section B: Paste or describe */}
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Paste a sample or describe what you want
+                  </label>
+                  <textarea
+                    value={customInstructions}
+                    onChange={(e) => setCustomInstructions(e.target.value)}
+                    rows={6}
+                    className="w-full border rounded-lg px-3 py-2 text-sm resize-y"
+                    placeholder={"Paste a complete Q&A to replicate its style...\n\nOR describe in English/Vietnamese:\n'Write a Q1 CIT scenario about a manufacturing company with issues on deductible expenses, depreciation of a leased machine, and a tax loss carry-forward from prior year.'"}
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Supports English and Vietnamese. Paste a question to replicate, or describe in your own words.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <button

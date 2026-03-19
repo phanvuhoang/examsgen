@@ -63,6 +63,70 @@ def list_questions(
     }
 
 
+@router.get("/for-reference")
+def get_questions_for_reference(
+    type: Optional[str] = None,
+    sac_thue: Optional[str] = None,
+):
+    """Lightweight list for the reference question dropdown."""
+    conditions = []
+    params = []
+    if type:
+        # Map frontend type names to DB question_type
+        type_map = {"mcq": "MCQ", "scenario": "SCENARIO_10", "longform": "LONGFORM_15",
+                     "MCQ": "MCQ", "SCENARIO_10": "SCENARIO_10", "LONGFORM_15": "LONGFORM_15"}
+        db_type = type_map.get(type, type)
+        conditions.append("question_type = %s")
+        params.append(db_type)
+    if sac_thue:
+        conditions.append("sac_thue = %s")
+        params.append(sac_thue)
+
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, question_type, sac_thue, question_number, created_at, content_json "
+            f"FROM questions {where} ORDER BY created_at DESC LIMIT 50",
+            params,
+        )
+        rows = cur.fetchall()
+
+    results = []
+    for r in rows:
+        q_id, q_type, q_sac, q_num, created, content = r
+        # Build a short label
+        date_str = created.strftime("%Y-%m-%d") if created else ""
+        # Try to get a snippet from content
+        snippet = ""
+        try:
+            cj = json.loads(content) if isinstance(content, str) else content
+            if q_type == "MCQ":
+                count = len(cj.get("questions", []))
+                snippet = f"{count} questions"
+            else:
+                scenario = cj.get("scenario", "")
+                snippet = scenario[:60] + "..." if len(scenario) > 60 else scenario
+        except Exception:
+            pass
+
+        label = f"{q_num or q_type} {q_sac}"
+        if snippet:
+            label += f" — {snippet}"
+        label += f" ({date_str})"
+
+        results.append({
+            "id": q_id,
+            "label": label,
+            "question_type": q_type,
+            "sac_thue": q_sac,
+            "created_at": created.isoformat() if created else None,
+        })
+
+    return results
+
+
 @router.get("/{question_id}")
 def get_question(question_id: int):
     with get_db() as conn:

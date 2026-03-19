@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 
 from backend.config import (
@@ -114,3 +115,72 @@ def build_context(sac_thue: str, question_type: str, question_number: str = None
         "regulations": regulations,
         "sample": sample,
     }
+
+
+def format_question_as_text(content: dict) -> str:
+    """Convert stored question JSON back to readable plain text for use as prompt reference."""
+    parts = []
+    q_type = content.get("type", "")
+
+    if q_type == "MCQ":
+        for q in content.get("questions", []):
+            parts.append(f"Question {q.get('number', '')}")
+            if q.get("scenario"):
+                parts.append(q["scenario"])
+            parts.append(q.get("question", ""))
+            for letter in ["A", "B", "C", "D"]:
+                opt = q.get("options", {}).get(letter, {})
+                key = " [KEY]" if opt.get("is_key") else ""
+                parts.append(f"  {letter}. {opt.get('text', '')}{key}")
+                if opt.get("explanation"):
+                    parts.append(f"     {opt['explanation']}")
+            parts.append("")
+    elif q_type in ("SCENARIO_10", "LONGFORM_15"):
+        qn = content.get("question_number", "")
+        marks = content.get("marks", "")
+        parts.append(f"Question {qn} ({marks} marks)")
+        parts.append(content.get("scenario", ""))
+        for sq in content.get("sub_questions", []):
+            parts.append(f"\n{sq.get('label', '')} ({sq.get('marks', '')} marks)")
+            parts.append(sq.get("question", ""))
+            if sq.get("answer"):
+                parts.append(f"Answer: {sq['answer']}")
+            for ms in sq.get("marking_scheme", []):
+                parts.append(f"  - {ms.get('point', '')} [{ms.get('mark', '')} mark(s)]")
+
+    return "\n".join(parts)
+
+
+def get_reference_content(reference_question_id: int = None, custom_instructions: str = None) -> str:
+    """Build the custom instructions block to inject into prompt."""
+    parts = []
+
+    if reference_question_id:
+        try:
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT content_json, question_type, sac_thue FROM questions WHERE id = %s",
+                    (reference_question_id,),
+                )
+                row = cur.fetchone()
+            if row:
+                content = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                ref_text = format_question_as_text(content)
+                parts.append(
+                    f"REFERENCE QUESTION (write a NEW question with SIMILAR style, structure and difficulty):\n{ref_text}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to load reference question {reference_question_id}: {e}")
+
+    if custom_instructions:
+        if len(custom_instructions) > 300 and any(
+            kw in custom_instructions for kw in ["Answer", "VND", "marks", "Calculate"]
+        ):
+            parts.append(
+                f"SAMPLE TO REPLICATE (write a NEW question with SIMILAR style, structure, difficulty and topic):\n{custom_instructions}"
+            )
+        else:
+            parts.append(f"SPECIFIC INSTRUCTIONS FROM EXAMINER:\n{custom_instructions}")
+
+    return "\n\n".join(parts)

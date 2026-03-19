@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from backend.models import MCQGenerateRequest, ScenarioGenerateRequest, LongformGenerateRequest
 from backend.ai_provider import call_ai, parse_ai_json
-from backend.context_builder import build_context
+from backend.context_builder import build_context, get_reference_content
 from backend.prompts import (
     MCQ_SYSTEM, MCQ_PROMPT,
     SCENARIO_SYSTEM, SCENARIO_PROMPT,
@@ -67,6 +67,11 @@ def generate_mcq(req: MCQGenerateRequest):
         if req.difficulty == "hard":
             topics_instruction += "\nMake these HARDER than standard — multi-step with tricky edge cases."
 
+        custom_block = get_reference_content(
+            reference_question_id=req.reference_question_id,
+            custom_instructions=req.custom_instructions,
+        )
+
         prompt = MCQ_PROMPT.format(
             count=req.count,
             sac_thue=req.sac_thue,
@@ -76,6 +81,7 @@ def generate_mcq(req: MCQGenerateRequest):
             regulations=ctx["regulations"],
             sample=ctx["sample"],
             topics_instruction=topics_instruction,
+            custom_instructions=custom_block,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=MCQ_SYSTEM)
@@ -117,6 +123,11 @@ def generate_scenario(req: ScenarioGenerateRequest):
         if req.scenario_industry:
             industry_instruction = f"Set the scenario in the {req.scenario_industry} industry."
 
+        custom_block = get_reference_content(
+            reference_question_id=req.reference_question_id,
+            custom_instructions=req.custom_instructions,
+        )
+
         prompt = SCENARIO_PROMPT.format(
             question_number=req.question_number,
             sac_thue=req.sac_thue,
@@ -128,6 +139,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             sample=ctx["sample"],
             industry_instruction=industry_instruction,
             question_type="SCENARIO_10",
+            custom_instructions=custom_block,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=SCENARIO_SYSTEM)
@@ -166,6 +178,11 @@ def generate_longform(req: LongformGenerateRequest):
     try:
         ctx = build_context(req.sac_thue, "LONGFORM_15", req.question_number)
 
+        custom_block = get_reference_content(
+            reference_question_id=req.reference_question_id,
+            custom_instructions=req.custom_instructions,
+        )
+
         prompt = LONGFORM_PROMPT.format(
             question_number=req.question_number,
             sac_thue=req.sac_thue,
@@ -175,6 +192,7 @@ def generate_longform(req: LongformGenerateRequest):
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
             sample=ctx["sample"],
+            custom_instructions=custom_block,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=LONGFORM_SYSTEM)

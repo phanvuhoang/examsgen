@@ -21,6 +21,8 @@ REGULATIONS:
 
 {topics_instruction}
 
+{custom_instructions}
+
 Return ONLY valid JSON, no markdown, no extra text:
 {{
   "type": "MCQ",
@@ -69,6 +71,8 @@ REGULATIONS:
 
 SAMPLE FORMAT:
 {sample}
+
+{custom_instructions}
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -119,6 +123,8 @@ REGULATIONS:
 
 SAMPLE FORMAT:
 {sample}
+
+{custom_instructions}
 
 Return ONLY valid JSON in this exact format:
 {{

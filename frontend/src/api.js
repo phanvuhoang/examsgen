@@ -68,6 +68,13 @@ export const api = {
     request('/generate/longform', { method: 'POST', body: JSON.stringify(data) }),
 
   // Questions
+  getQuestionsForReference: ({ type, sac_thue }) => {
+    const params = new URLSearchParams()
+    if (type) params.set('type', type)
+    if (sac_thue) params.set('sac_thue', sac_thue)
+    return request(`/questions/for-reference?${params}`)
+  },
+
   getQuestions: (params = {}) => {
     const qs = new URLSearchParams(params).toString()
     return request(`/questions${qs ? `?${qs}` : ''}`)
