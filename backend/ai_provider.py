@@ -65,7 +65,7 @@ def call_ai(prompt: str, model_tier: str = "strong", system_prompt: str = None) 
                     json={
                         "model": model,
                         "messages": messages,
-                        "max_tokens": 6000,
+                        "max_tokens": 8000,
                         "temperature": 0.7,
                     },
                     timeout=120,
@@ -101,22 +101,59 @@ def call_ai(prompt: str, model_tier: str = "strong", system_prompt: str = None) 
 
 
 def parse_ai_json(content: str) -> dict:
-    """Parse JSON from AI response, handling markdown code blocks."""
+    """Parse JSON from AI response, handling markdown code blocks and truncation."""
     content = content.strip()
+
+    # Strip markdown code fences
     if content.startswith("```"):
         lines = content.split("\n")
         lines = lines[1:]  # remove opening ```json
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         content = "\n".join(lines)
+
+    content = content.strip()
+
+    # Try direct parse first
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        # Try to find JSON object in the response
-        match = re.search(r'\{[\s\S]*\}', content)
-        if match:
-            return json.loads(match.group())
-        raise
+        pass
+
+    # Try to find JSON object boundaries
+    start = content.find('{')
+    if start == -1:
+        raise ValueError("No JSON object found in AI response")
+
+    # Try progressively shorter substrings to handle truncation
+    text = content[start:]
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # AI truncated mid-JSON — try to close it gracefully
+    # Find last complete question entry and close the JSON
+    # Try closing with common endings
+    for suffix in [']}', ']}]}', '"}]}]}', '"]}]}', '}]}]}']:
+        try:
+            return json.loads(text + suffix)
+        except:
+            pass
+
+    # Last resort: find last valid JSON subset
+    for i in range(len(text), max(len(text)//2, 100), -1):
+        try:
+            candidate = text[:i]
+            # Try to close open brackets
+            open_braces = candidate.count('{') - candidate.count('}')
+            open_brackets = candidate.count('[') - candidate.count(']')
+            closed = candidate + (']' * open_brackets) + ('}' * open_braces)
+            return json.loads(closed)
+        except:
+            continue
+
+    raise ValueError(f"Cannot parse AI response as JSON. First 200 chars: {content[:200]}")
 
 
 import re
