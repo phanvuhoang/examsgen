@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: examsgen
+    ports:
+      - "8001:8000"
+    environment:
+      - CLAUDIBLE_BASE_URL=${CLAUDIBLE_BASE_URL}
+      - CLAUDIBLE_API_KEY=${CLAUDIBLE_API_KEY}
+      - CLAUDIBLE_MODEL_STRONG=${CLAUDIBLE_MODEL_STRONG:-claude-opus-4.6}
+      - CLAUDIBLE_MODEL_FAST=${CLAUDIBLE_MODEL_FAST:-claude-sonnet-4.6}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL_STRONG=${ANTHROPIC_MODEL_STRONG:-claude-opus-4-5}
+      - ANTHROPIC_MODEL_FAST=${ANTHROPIC_MODEL_FAST:-claude-sonnet-4-5}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1}
+      - DATABASE_URL=${DATABASE_URL}
+      - APP_PASSWORD=${APP_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATA_DIR=/app/data
+    volumes:
+      - /data/examsgen:/app/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.examsgen.rule=Host(`examsgen.gpt4vn.com`)"
+      - "traefik.http.routers.examsgen.tls.certresolver=letsencrypt"
+      - "traefik.http.services.examsgen.loadbalancer.server.port=8000"
+    networks:
+      - coolify
+    restart: unless-stopped
+
+networks:
+  coolify:
+    external: true
