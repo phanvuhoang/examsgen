@@ -211,3 +211,25 @@ Feel free to ask if you need clarification on:
 - Deployment requirements
 
 The goal is a working, production-quality app that a non-developer can use daily to generate exam questions. Reliability and output quality matter more than feature breadth.
+
+---
+
+## Feature 7: Conversational Question Refinement
+
+After a question is generated, a **chat panel** appears below the preview. The user can chat with AI to refine the question iteratively — in English or Vietnamese.
+
+Examples:
+- *"Make it harder, add a loss carry-forward from prior year"*
+- *"Thêm vấn đề về chuyển giá liên quan đến công ty mẹ Hàn Quốc"*
+- *"Change the company to a food manufacturing firm with revenue ~50 billion VND"*
+- *"Split part (b) into two sub-questions worth 2 marks each"*
+
+The AI receives: current question JSON + full conversation history + new instruction → returns updated complete question JSON. The preview updates in real-time.
+
+**Key design decisions:**
+- Chat history lives in frontend state only — no backend storage needed
+- Default model: Sonnet (fast enough, saves cost)
+- Max 10 exchanges in history to avoid context overflow
+- "Save to bank" always saves the LATEST version
+- Reset chat when user clicks "Regenerate"
+- Works for all question types: MCQ, Scenario, Long-form
