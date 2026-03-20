@@ -100,6 +100,20 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             );
 
+            CREATE TABLE IF NOT EXISTS exam_sessions (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL UNIQUE,
+                exam_window_start DATE,
+                exam_window_end DATE,
+                regulations_cutoff DATE NOT NULL,
+                fiscal_year_end DATE,
+                tax_year INTEGER,
+                description TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                is_default BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+
             CREATE TABLE IF NOT EXISTS generation_log (
                 id SERIAL PRIMARY KEY,
                 question_id INTEGER REFERENCES questions(id),
@@ -114,5 +128,26 @@ def init_db():
                 error TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             );
+
+            -- Seed default sessions
+            INSERT INTO exam_sessions (name, exam_window_start, exam_window_end, regulations_cutoff, fiscal_year_end, tax_year, is_default)
+            VALUES ('June 2026', '2026-06-01', '2026-06-30', '2025-12-31', '2025-12-31', 2025, TRUE)
+            ON CONFLICT (name) DO NOTHING;
+
+            INSERT INTO exam_sessions (name, exam_window_start, exam_window_end, regulations_cutoff, fiscal_year_end, tax_year, is_default)
+            VALUES ('December 2026', '2026-12-01', '2026-12-31', '2025-12-31', '2025-12-31', 2025, FALSE)
+            ON CONFLICT (name) DO NOTHING;
+
+            -- Add session_id columns to KB and questions tables
+            ALTER TABLE kb_syllabus ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES exam_sessions(id);
+            ALTER TABLE kb_regulation ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES exam_sessions(id);
+            ALTER TABLE kb_sample ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES exam_sessions(id);
+            ALTER TABLE questions ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES exam_sessions(id);
+
+            -- Assign existing rows to default session
+            UPDATE kb_syllabus SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
+            UPDATE kb_regulation SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
+            UPDATE kb_sample SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
+            UPDATE questions SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
         """)
         logger.info("Database tables initialized")

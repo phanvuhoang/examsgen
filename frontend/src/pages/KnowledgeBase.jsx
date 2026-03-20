@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api'
+import ParseReviewPanel from '../components/ParseReviewPanel'
 
 const SAC_THUE_OPTIONS = ['CIT', 'VAT', 'PIT', 'FCT', 'TP', 'ADMIN']
 const TABS = ['Syllabus', 'Regulations', 'Sample Questions']
@@ -17,11 +18,27 @@ export default function KnowledgeBase() {
   const [showImport, setShowImport] = useState(false)
   const [bankQuestions, setBankQuestions] = useState([])
   const [importForm, setImportForm] = useState({ question_id: '', title: '', exam_tricks: '' })
+  const [showParse, setShowParse] = useState(false)
+  const [sessions, setSessions] = useState([])
+  const [currentSession, setCurrentSession] = useState(null)
+
+  // Load sessions and resolve current
+  useEffect(() => {
+    api.getSessions().then((data) => {
+      setSessions(data)
+      const storedId = localStorage.getItem('currentSessionId')
+      const match = data.find((s) => String(s.id) === storedId) || data.find((s) => s.is_default)
+      if (match) setCurrentSession(match)
+    }).catch(() => {})
+  }, [])
+
+  const sessionId = currentSession?.id
 
   const fetchItems = async () => {
     setLoading(true)
     try {
       const params = {}
+      if (sessionId) params.session_id = sessionId
       if (sacThue) params.sac_thue = sacThue
       if (search) params.search = search
       if (tab === 0) {
@@ -29,7 +46,6 @@ export default function KnowledgeBase() {
       } else if (tab === 1) {
         setItems(await api.getKBRegulations(params))
       } else {
-        if (sacThue) params.sac_thue = sacThue
         setItems(await api.getKBSamples(params))
       }
     } catch {
@@ -39,12 +55,12 @@ export default function KnowledgeBase() {
     }
   }
 
-  useEffect(() => { fetchItems() }, [tab, sacThue, search])
+  useEffect(() => { if (sessionId) fetchItems() }, [tab, sacThue, search, sessionId])
 
   const resetForm = () => {
-    if (tab === 0) setForm({ sac_thue: 'CIT', section_code: '', section_title: '', content: '', tags: '' })
-    else if (tab === 1) setForm({ sac_thue: 'CIT', regulation_ref: '', content: '', tags: '' })
-    else setForm({ question_type: 'MCQ', sac_thue: 'CIT', title: '', content: '', exam_tricks: '' })
+    if (tab === 0) setForm({ sac_thue: 'CIT', section_code: '', section_title: '', content: '', tags: '', session_id: sessionId })
+    else if (tab === 1) setForm({ sac_thue: 'CIT', regulation_ref: '', content: '', tags: '', session_id: sessionId })
+    else setForm({ question_type: 'MCQ', sac_thue: 'CIT', title: '', content: '', exam_tricks: '', session_id: sessionId })
   }
 
   const handleAdd = () => {
@@ -55,9 +71,9 @@ export default function KnowledgeBase() {
 
   const handleEdit = (item) => {
     setEditItem(item)
-    if (tab === 0) setForm({ sac_thue: item.sac_thue, section_code: item.section_code || '', section_title: item.section_title || '', content: item.content, tags: item.tags || '' })
-    else if (tab === 1) setForm({ sac_thue: item.sac_thue, regulation_ref: item.regulation_ref || '', content: item.content, tags: item.tags || '' })
-    else setForm({ question_type: item.question_type, sac_thue: item.sac_thue, title: item.title || '', content: item.content, exam_tricks: item.exam_tricks || '' })
+    if (tab === 0) setForm({ sac_thue: item.sac_thue, section_code: item.section_code || '', section_title: item.section_title || '', content: item.content, tags: item.tags || '', session_id: sessionId })
+    else if (tab === 1) setForm({ sac_thue: item.sac_thue, regulation_ref: item.regulation_ref || '', content: item.content, tags: item.tags || '', session_id: sessionId })
+    else setForm({ question_type: item.question_type, sac_thue: item.sac_thue, title: item.title || '', content: item.content, exam_tricks: item.exam_tricks || '', session_id: sessionId })
     setShowForm(true)
   }
 
@@ -117,16 +133,35 @@ export default function KnowledgeBase() {
     setShowImport(true)
   }
 
+  const switchSession = (id) => {
+    const match = sessions.find((s) => String(s.id) === id)
+    if (match) {
+      setCurrentSession(match)
+      localStorage.setItem('currentSessionId', id)
+    }
+  }
+
   return (
     <div className="max-w-6xl">
-      <h2 className="text-2xl font-bold mb-6">Knowledge Base</h2>
+      {/* Session header */}
+      <div className="flex items-center gap-3 mb-6">
+        <h2 className="text-2xl font-bold">Knowledge Base</h2>
+        <span className="text-gray-400">—</span>
+        <select
+          value={sessionId || ''}
+          onChange={(e) => switchSession(e.target.value)}
+          className="text-sm border rounded-lg px-3 py-1.5 font-medium text-brand-600"
+        >
+          {sessions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 border-b">
         {TABS.map((t, i) => (
           <button
             key={t}
-            onClick={() => { setTab(i); setShowForm(false) }}
+            onClick={() => { setTab(i); setShowForm(false); setShowParse(false) }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               tab === i ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
@@ -155,12 +190,23 @@ export default function KnowledgeBase() {
         <button onClick={handleAdd} className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600">
           + Add
         </button>
+        {(tab === 0 || tab === 1) && sessionId && (
+          <button onClick={() => setShowParse(!showParse)}
+            className="px-4 py-2 bg-purple-500 text-white text-sm rounded-lg hover:bg-purple-600">
+            Parse & Match File
+          </button>
+        )}
         {tab === 2 && (
           <button onClick={loadBankQuestions} className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600">
             Import from Bank
           </button>
         )}
       </div>
+
+      {/* Parse & Match Panel */}
+      {showParse && sessionId && (
+        <ParseReviewPanel sessionId={sessionId} onDone={() => { setShowParse(false); fetchItems() }} />
+      )}
 
       {/* Add/Edit Form */}
       {showForm && (
@@ -286,7 +332,7 @@ export default function KnowledgeBase() {
       {loading ? (
         <div className="text-center py-8 text-gray-400">Loading...</div>
       ) : items.length === 0 ? (
-        <div className="text-center py-8 text-gray-400">No items yet. Click "+ Add" to create one.</div>
+        <div className="text-center py-8 text-gray-400">No items yet. Click "+ Add" to create one, or use "Parse & Match File" to import from data files.</div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
           <table className="w-full text-sm">

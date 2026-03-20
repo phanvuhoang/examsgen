@@ -33,6 +33,16 @@ export default function Generate() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [currentContent, setCurrentContent] = useState(null)
+  const [currentSession, setCurrentSession] = useState(null)
+
+  // Load current session
+  useEffect(() => {
+    api.getSessions().then((data) => {
+      const storedId = localStorage.getItem('currentSessionId')
+      const match = data.find((s) => String(s.id) === storedId) || data.find((s) => s.is_default)
+      if (match) setCurrentSession(match)
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const t = searchParams.get('type')
@@ -63,6 +73,7 @@ export default function Generate() {
         kb_syllabus_ids: kbSyllabusIds.length ? kbSyllabusIds : null,
         kb_regulation_ids: kbRegulationIds.length ? kbRegulationIds : null,
         kb_sample_ids: kbSampleIds.length ? kbSampleIds : null,
+        session_id: currentSession?.id || null,
       }
       let data
       if (type === 'mcq') {
@@ -129,6 +140,16 @@ export default function Generate() {
   return (
     <div className="max-w-4xl">
       <h2 className="text-2xl font-bold mb-6">Generate Questions</h2>
+
+      {/* Session info bar */}
+      {currentSession && (
+        <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4 flex gap-4">
+          <span>Session: <strong>{currentSession.name}</strong></span>
+          <span>Reg cutoff: <strong>{currentSession.regulations_cutoff}</strong></span>
+          <span>Fiscal year: <strong>{currentSession.fiscal_year_end}</strong></span>
+          <span>Tax year: <strong>{currentSession.tax_year}</strong></span>
+        </div>
+      )}
 
       {/* Step 1: Type Selection */}
       <div className="mb-6">
@@ -301,7 +322,7 @@ export default function Generate() {
                   </p>
                   <KBMultiSelect
                     label="Syllabus items to test"
-                    endpoint={`/api/kb/syllabus?sac_thue=${sac_thue}`}
+                    endpoint={`/api/kb/syllabus?sac_thue=${sac_thue}${currentSession ? `&session_id=${currentSession.id}` : ''}`}
                     value={kbSyllabusIds}
                     onChange={setKbSyllabusIds}
                     displayKey="section_title"
@@ -309,7 +330,7 @@ export default function Generate() {
                   />
                   <KBMultiSelect
                     label="Regulation paragraphs"
-                    endpoint={`/api/kb/regulations?sac_thue=${sac_thue}`}
+                    endpoint={`/api/kb/regulations?sac_thue=${sac_thue}${currentSession ? `&session_id=${currentSession.id}` : ''}`}
                     value={kbRegulationIds}
                     onChange={setKbRegulationIds}
                     displayKey="regulation_ref"
@@ -317,7 +338,7 @@ export default function Generate() {
                   />
                   <KBMultiSelect
                     label="Style references (sample questions)"
-                    endpoint={`/api/kb/samples?sac_thue=${sac_thue}&question_type=${type === 'mcq' ? 'MCQ' : type === 'scenario' ? 'SCENARIO_10' : 'LONGFORM_15'}`}
+                    endpoint={`/api/kb/samples?sac_thue=${sac_thue}&question_type=${type === 'mcq' ? 'MCQ' : type === 'scenario' ? 'SCENARIO_10' : 'LONGFORM_15'}${currentSession ? `&session_id=${currentSession.id}` : ''}`}
                     value={kbSampleIds}
                     onChange={setKbSampleIds}
                     displayKey="title"

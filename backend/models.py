@@ -18,6 +18,7 @@ class MCQGenerateRequest(BaseModel):
     kb_syllabus_ids: Optional[List[int]] = None
     kb_regulation_ids: Optional[List[int]] = None
     kb_sample_ids: Optional[List[int]] = None
+    session_id: Optional[int] = None
 
 
 class ScenarioGenerateRequest(BaseModel):
@@ -32,6 +33,7 @@ class ScenarioGenerateRequest(BaseModel):
     kb_syllabus_ids: Optional[List[int]] = None
     kb_regulation_ids: Optional[List[int]] = None
     kb_sample_ids: Optional[List[int]] = None
+    session_id: Optional[int] = None
 
 
 class LongformGenerateRequest(BaseModel):
@@ -45,6 +47,7 @@ class LongformGenerateRequest(BaseModel):
     kb_syllabus_ids: Optional[List[int]] = None
     kb_regulation_ids: Optional[List[int]] = None
     kb_sample_ids: Optional[List[int]] = None
+    session_id: Optional[int] = None
 
 
 class RefineRequest(BaseModel):

@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Sessions from './pages/Sessions'
 import Generate from './pages/Generate'
 import KnowledgeBase from './pages/KnowledgeBase'
 import QuestionBank from './pages/QuestionBank'
@@ -26,6 +27,7 @@ export default function App() {
     <Layout onLogout={() => { localStorage.removeItem('token'); setAuthed(false) }}>
       <Routes>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/sessions" element={<Sessions />} />
         <Route path="/generate" element={<Generate />} />
         <Route path="/kb" element={<KnowledgeBase />} />
         <Route path="/bank" element={<QuestionBank />} />

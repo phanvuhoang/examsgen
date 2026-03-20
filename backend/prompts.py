@@ -2,6 +2,8 @@ MCQ_SYSTEM = "You are a senior ACCA TX(VNM) examiner with deep expertise in Viet
 
 MCQ_PROMPT = """Generate {count} MCQ question(s) on {sac_thue} for the {exam_session} exam.
 
+{session_context}
+
 REQUIREMENTS:
 - Each MCQ = 2 marks
 - 4 options A/B/C/D, one correct marked with "is_key": true
@@ -52,6 +54,8 @@ Generate {count} NEW MCQs covering different topics and company scenarios."""
 SCENARIO_SYSTEM = "You are a senior ACCA TX(VNM) examiner. Generate exam-standard scenario questions."
 
 SCENARIO_PROMPT = """Generate Question {question_number} — a {marks}-mark scenario question on {sac_thue} for the {exam_session} exam.
+
+{session_context}
 
 STRUCTURE:
 - One integrated business scenario (Vietnamese company/individual)
@@ -107,6 +111,8 @@ Make it CHALLENGING — students must APPLY regulations, not just recall."""
 LONGFORM_SYSTEM = SCENARIO_SYSTEM
 
 LONGFORM_PROMPT = """Generate Question {question_number} — a {marks}-mark long-form scenario question on {sac_thue} for the {exam_session} exam.
+
+{session_context}
 
 STRUCTURE:
 - Complex integrated business scenario with MULTIPLE tax issues

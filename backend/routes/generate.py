@@ -18,18 +18,45 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/generate", tags=["generate"])
 
 
+def get_session(session_id: int = None) -> dict:
+    """Resolve exam session. Returns session dict or empty dict."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        if session_id:
+            cur.execute("SELECT * FROM exam_sessions WHERE id = %s", (session_id,))
+        else:
+            cur.execute("SELECT * FROM exam_sessions WHERE is_default = TRUE LIMIT 1")
+        row = cur.fetchone()
+        if not row:
+            return {}
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
+
+
+def build_session_context(session: dict) -> str:
+    """Build session context string for prompt injection."""
+    if not session:
+        return ""
+    return f"""EXAM SESSION: {session['name']}
+REGULATIONS CUTOFF: Only use regulations effective up to {session['regulations_cutoff']}. Ignore any regulations enacted after this date.
+FISCAL PERIOD: All scenarios must use fiscal year ending {session['fiscal_year_end']}. Do not use dates beyond {session['fiscal_year_end']} in scenarios.
+TAX YEAR: {session['tax_year']}"""
+
+
 def _save_question(question_type, sac_thue, question_part, question_number,
                    content_json, content_html, model_used, provider_used,
-                   exam_session, duration_ms, prompt_tokens, completion_tokens):
+                   exam_session, duration_ms, prompt_tokens, completion_tokens,
+                   session_id=None):
     """Save question and generation log to DB. Returns question id."""
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO questions (question_type, sac_thue, question_part, question_number, "
-            "content_json, content_html, model_used, provider_used, exam_session) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            "content_json, content_html, model_used, provider_used, exam_session, session_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (question_type, sac_thue, question_part, question_number,
-             json.dumps(content_json), content_html, model_used, provider_used, exam_session),
+             json.dumps(content_json), content_html, model_used, provider_used, exam_session,
+             session_id),
         )
         q_id = cur.fetchone()[0]
         cur.execute(
@@ -60,6 +87,8 @@ def _log_failure(question_type, sac_thue, error, duration_ms):
 def generate_mcq(req: MCQGenerateRequest):
     start = time.time()
     try:
+        session = get_session(req.session_id)
+        session_ctx = build_session_context(session)
         ctx = build_context(req.sac_thue, "MCQ")
         topics_instruction = ""
         if req.topics:
@@ -88,6 +117,7 @@ def generate_mcq(req: MCQGenerateRequest):
             topics_instruction=topics_instruction,
             custom_instructions=custom_block,
             kb_context=kb_block,
+            session_context=session_ctx,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=MCQ_SYSTEM)
@@ -101,6 +131,7 @@ def generate_mcq(req: MCQGenerateRequest):
             result["model"], result["provider"],
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
+            session_id=session.get("id"),
         )
 
         return {
@@ -124,6 +155,8 @@ def generate_mcq(req: MCQGenerateRequest):
 def generate_scenario(req: ScenarioGenerateRequest):
     start = time.time()
     try:
+        session = get_session(req.session_id)
+        session_ctx = build_session_context(session)
         ctx = build_context(req.sac_thue, "SCENARIO_10", req.question_number)
         industry_instruction = ""
         if req.scenario_industry:
@@ -152,6 +185,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             question_type="SCENARIO_10",
             custom_instructions=custom_block,
             kb_context=kb_block,
+            session_context=session_ctx,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=SCENARIO_SYSTEM)
@@ -165,6 +199,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             result["model"], result["provider"],
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
+            session_id=session.get("id"),
         )
 
         return {
@@ -188,6 +223,8 @@ def generate_scenario(req: ScenarioGenerateRequest):
 def generate_longform(req: LongformGenerateRequest):
     start = time.time()
     try:
+        session = get_session(req.session_id)
+        session_ctx = build_session_context(session)
         ctx = build_context(req.sac_thue, "LONGFORM_15", req.question_number)
 
         custom_block = get_reference_content(
@@ -211,6 +248,7 @@ def generate_longform(req: LongformGenerateRequest):
             sample=ctx["sample"],
             custom_instructions=custom_block,
             kb_context=kb_block,
+            session_context=session_ctx,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=LONGFORM_SYSTEM)
@@ -224,6 +262,7 @@ def generate_longform(req: LongformGenerateRequest):
             result["model"], result["provider"],
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
+            session_id=session.get("id"),
         )
 
         return {

@@ -1,7 +1,10 @@
+import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
+import { api } from '../api'
 
 const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4' },
+  { path: '/sessions', label: 'Sessions', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
   { path: '/generate', label: 'Generate', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
   { path: '/kb', label: 'Knowledge Base', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
   { path: '/bank', label: 'Question Bank', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
@@ -10,6 +13,30 @@ const NAV_ITEMS = [
 ]
 
 export default function Layout({ children, onLogout }) {
+  const [sessions, setSessions] = useState([])
+  const [currentSessionId, setCurrentSessionId] = useState(localStorage.getItem('currentSessionId') || '')
+
+  useEffect(() => {
+    api.getSessions().then((data) => {
+      setSessions(data)
+      if (!currentSessionId) {
+        const def = data.find((s) => s.is_default)
+        if (def) {
+          setCurrentSessionId(String(def.id))
+          localStorage.setItem('currentSessionId', String(def.id))
+        }
+      }
+    }).catch(() => {})
+  }, [])
+
+  const handleSessionChange = (id) => {
+    setCurrentSessionId(id)
+    localStorage.setItem('currentSessionId', id)
+    window.dispatchEvent(new Event('storage'))
+  }
+
+  const currentSessionName = sessions.find((s) => String(s.id) === currentSessionId)?.name || 'Select session'
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
@@ -17,6 +44,15 @@ export default function Layout({ children, onLogout }) {
         <div className="p-4 border-b border-brand-400">
           <h1 className="text-xl font-bold">ExamsGen</h1>
           <p className="text-brand-200 text-xs mt-1">ACCA TX(VNM)</p>
+          {sessions.length > 0 && (
+            <select
+              value={currentSessionId}
+              onChange={(e) => handleSessionChange(e.target.value)}
+              className="mt-2 w-full text-xs bg-brand-600 border border-brand-400 rounded px-2 py-1 text-white"
+            >
+              {sessions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {NAV_ITEMS.map(({ path, label, icon }) => (

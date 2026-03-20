@@ -20,6 +20,7 @@ class SyllabusItem(BaseModel):
     content: str
     tags: Optional[str] = None
     source_file: Optional[str] = None
+    session_id: Optional[int] = None
 
 
 class RegulationItem(BaseModel):
@@ -29,6 +30,7 @@ class RegulationItem(BaseModel):
     tags: Optional[str] = None
     syllabus_ids: Optional[List[int]] = []
     source_file: Optional[str] = None
+    session_id: Optional[int] = None
 
 
 class SampleItem(BaseModel):
@@ -40,6 +42,7 @@ class SampleItem(BaseModel):
     syllabus_ids: Optional[List[int]] = []
     regulation_ids: Optional[List[int]] = []
     source: str = "manual"
+    session_id: Optional[int] = None
 
 
 class ParseRequest(BaseModel):
@@ -51,11 +54,14 @@ class ParseRequest(BaseModel):
 # --- Syllabus CRUD ---
 
 @router.get("/syllabus")
-def list_syllabus(sac_thue: Optional[str] = None, search: Optional[str] = None):
+def list_syllabus(session_id: Optional[int] = None, sac_thue: Optional[str] = None, search: Optional[str] = None):
     with get_db() as conn:
         cur = conn.cursor()
-        query = "SELECT id, sac_thue, section_code, section_title, content, tags, is_active, created_at FROM kb_syllabus WHERE 1=1"
+        query = "SELECT id, sac_thue, section_code, section_title, content, tags, is_active, created_at, session_id FROM kb_syllabus WHERE 1=1"
         params = []
+        if session_id:
+            query += " AND session_id = %s"
+            params.append(session_id)
         if sac_thue:
             query += " AND sac_thue = %s"
             params.append(sac_thue)
@@ -74,8 +80,8 @@ def create_syllabus(item: SyllabusItem):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO kb_syllabus (sac_thue, section_code, section_title, content, tags, source_file) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-            (item.sac_thue, item.section_code, item.section_title, item.content, item.tags, item.source_file)
+            "INSERT INTO kb_syllabus (sac_thue, section_code, section_title, content, tags, source_file, session_id) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (item.sac_thue, item.section_code, item.section_title, item.content, item.tags, item.source_file, item.session_id)
         )
         return {"id": cur.fetchone()[0]}
 
@@ -100,11 +106,14 @@ def delete_syllabus(item_id: int):
 # --- Regulation CRUD ---
 
 @router.get("/regulations")
-def list_regulations(sac_thue: Optional[str] = None, search: Optional[str] = None):
+def list_regulations(session_id: Optional[int] = None, sac_thue: Optional[str] = None, search: Optional[str] = None):
     with get_db() as conn:
         cur = conn.cursor()
-        query = "SELECT id, sac_thue, regulation_ref, content, tags, syllabus_ids, is_active, created_at FROM kb_regulation WHERE 1=1"
+        query = "SELECT id, sac_thue, regulation_ref, content, tags, syllabus_ids, is_active, created_at, session_id FROM kb_regulation WHERE 1=1"
         params = []
+        if session_id:
+            query += " AND session_id = %s"
+            params.append(session_id)
         if sac_thue:
             query += " AND sac_thue = %s"
             params.append(sac_thue)
@@ -123,8 +132,8 @@ def create_regulation(item: RegulationItem):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO kb_regulation (sac_thue, regulation_ref, content, tags, syllabus_ids, source_file) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-            (item.sac_thue, item.regulation_ref, item.content, item.tags, item.syllabus_ids or [], item.source_file)
+            "INSERT INTO kb_regulation (sac_thue, regulation_ref, content, tags, syllabus_ids, source_file, session_id) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (item.sac_thue, item.regulation_ref, item.content, item.tags, item.syllabus_ids or [], item.source_file, item.session_id)
         )
         return {"id": cur.fetchone()[0]}
 
@@ -149,11 +158,14 @@ def delete_regulation(item_id: int):
 # --- Sample CRUD ---
 
 @router.get("/samples")
-def list_samples(sac_thue: Optional[str] = None, question_type: Optional[str] = None, search: Optional[str] = None):
+def list_samples(session_id: Optional[int] = None, sac_thue: Optional[str] = None, question_type: Optional[str] = None, search: Optional[str] = None):
     with get_db() as conn:
         cur = conn.cursor()
-        query = "SELECT id, question_type, sac_thue, title, content, exam_tricks, syllabus_ids, regulation_ids, source, created_at FROM kb_sample WHERE 1=1"
+        query = "SELECT id, question_type, sac_thue, title, content, exam_tricks, syllabus_ids, regulation_ids, source, created_at, session_id FROM kb_sample WHERE 1=1"
         params = []
+        if session_id:
+            query += " AND session_id = %s"
+            params.append(session_id)
         if sac_thue:
             query += " AND sac_thue = %s"
             params.append(sac_thue)
@@ -175,8 +187,8 @@ def create_sample(item: SampleItem):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO kb_sample (question_type, sac_thue, title, content, exam_tricks, syllabus_ids, regulation_ids, source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-            (item.question_type, item.sac_thue, item.title, item.content, item.exam_tricks, item.syllabus_ids or [], item.regulation_ids or [], item.source)
+            "INSERT INTO kb_sample (question_type, sac_thue, title, content, exam_tricks, syllabus_ids, regulation_ids, source, session_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (item.question_type, item.sac_thue, item.title, item.content, item.exam_tricks, item.syllabus_ids or [], item.regulation_ids or [], item.source, item.session_id)
         )
         return {"id": cur.fetchone()[0]}
 

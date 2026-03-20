@@ -126,6 +126,21 @@ export const api = {
   importKBSampleFromBank: (data) =>
     request('/kb/samples/import-from-bank', { method: 'POST', body: JSON.stringify(data) }),
 
+  // Exam Sessions
+  getSessions: () => request('/sessions/'),
+  createSession: (data) =>
+    request('/sessions/', { method: 'POST', body: JSON.stringify(data) }),
+  updateSession: (id, data) =>
+    request(`/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  setDefaultSession: (id) =>
+    request(`/sessions/${id}/set-default`, { method: 'POST' }),
+  cloneSession: (targetId, sourceId) =>
+    request(`/sessions/${targetId}/clone-from/${sourceId}`, { method: 'POST' }),
+  parseAndMatch: (sessionId, data) =>
+    request(`/sessions/${sessionId}/parse-and-match`, { method: 'POST', body: JSON.stringify(data) }),
+  saveParsedChunks: (sessionId, data) =>
+    request(`/sessions/${sessionId}/save-parsed-chunks`, { method: 'POST', body: JSON.stringify(data) }),
+
   // Export
   exportWord: (questionIds) =>
     request('/export/word', {
