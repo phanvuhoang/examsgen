@@ -1,10 +1,11 @@
+import os
 import psycopg2
 import psycopg2.extras
 import json
 import logging
 from contextlib import contextmanager
 
-from backend.config import DATABASE_URL
+from backend.config import DATABASE_URL, DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -129,14 +130,21 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             );
 
-            -- Seed default sessions
-            INSERT INTO exam_sessions (name, exam_window_start, exam_window_end, regulations_cutoff, fiscal_year_end, tax_year, is_default)
-            VALUES ('June 2026', '2026-06-01', '2026-06-30', '2025-12-31', '2025-12-31', 2025, TRUE)
-            ON CONFLICT (name) DO NOTHING;
+            -- Add folder_path to exam_sessions
+            ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS folder_path VARCHAR(500);
 
-            INSERT INTO exam_sessions (name, exam_window_start, exam_window_end, regulations_cutoff, fiscal_year_end, tax_year, is_default)
-            VALUES ('December 2026', '2026-12-01', '2026-12-31', '2025-12-31', '2025-12-31', 2025, FALSE)
-            ON CONFLICT (name) DO NOTHING;
+            -- Add doc_type and session_id to regulations
+            ALTER TABLE regulations ADD COLUMN IF NOT EXISTS doc_type VARCHAR(50) DEFAULT 'regulation';
+            ALTER TABLE regulations ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES exam_sessions(id);
+
+            -- Seed default sessions
+            INSERT INTO exam_sessions (name, exam_window_start, exam_window_end, regulations_cutoff, fiscal_year_end, tax_year, is_default, folder_path)
+            VALUES ('June 2026', '2026-06-01', '2026-06-30', '2025-12-31', '2025-12-31', 2025, TRUE, 'sessions/june_2026')
+            ON CONFLICT (name) DO UPDATE SET folder_path = EXCLUDED.folder_path WHERE exam_sessions.folder_path IS NULL;
+
+            INSERT INTO exam_sessions (name, exam_window_start, exam_window_end, regulations_cutoff, fiscal_year_end, tax_year, is_default, folder_path)
+            VALUES ('December 2026', '2026-12-01', '2026-12-31', '2025-12-31', '2025-12-31', 2025, FALSE, 'sessions/december_2026')
+            ON CONFLICT (name) DO UPDATE SET folder_path = EXCLUDED.folder_path WHERE exam_sessions.folder_path IS NULL;
 
             -- Add session_id columns to KB and questions tables
             ALTER TABLE kb_syllabus ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES exam_sessions(id);
@@ -149,5 +157,11 @@ def init_db():
             UPDATE kb_regulation SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
             UPDATE kb_sample SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
             UPDATE questions SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
+            UPDATE regulations SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
         """)
+        # Create session folders on disk
+        cur.execute("SELECT folder_path FROM exam_sessions WHERE folder_path IS NOT NULL")
+        for (fp,) in cur.fetchall():
+            for sub in ['regulations', 'syllabus', 'samples']:
+                os.makedirs(os.path.join(DATA_DIR, fp, sub), exist_ok=True)
         logger.info("Database tables initialized")
