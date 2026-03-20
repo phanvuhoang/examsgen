@@ -1,12 +1,15 @@
-from fastapi import APIRouter, HTTPException
+import json
+import os
+import re
+import shutil
+import logging
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
 from backend.database import get_db
 from backend.ai_provider import call_ai, parse_ai_json_list
-import json
-import os
-import logging
+from backend.config import DATA_DIR
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)
@@ -51,17 +54,27 @@ def list_sessions():
         return [dict(zip(cols, r)) for r in rows]
 
 
+def _make_folder_name(name: str) -> str:
+    """Convert session name to folder-safe name."""
+    return re.sub(r'[^a-z0-9_]', '', name.lower().replace(' ', '_'))
+
+
 @router.post("/")
 def create_session(session: SessionCreate):
+    folder_name = _make_folder_name(session.name)
+    folder_path = f"sessions/{folder_name}"
+    # Create session folder structure
+    for sub in ['regulations', 'syllabus', 'samples']:
+        os.makedirs(os.path.join(DATA_DIR, folder_path, sub), exist_ok=True)
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO exam_sessions (name, exam_window_start, exam_window_end,
-                regulations_cutoff, fiscal_year_end, tax_year, description)
-            VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id
+                regulations_cutoff, fiscal_year_end, tax_year, description, folder_path)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
         """, (session.name, session.exam_window_start, session.exam_window_end,
               session.regulations_cutoff, session.fiscal_year_end,
-              session.tax_year, session.description))
+              session.tax_year, session.description, folder_path))
         return {"id": cur.fetchone()[0]}
 
 
@@ -211,6 +224,12 @@ def save_parsed_chunks(session_id: int, data: dict):
                     VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id
                 """, (sac_thue, chunk.get("section_code"), chunk.get("section_title"),
                       chunk["content"], chunk.get("tags"), source_file, session_id))
+            elif file_type == "sample_questions":
+                cur.execute("""
+                    INSERT INTO kb_sample (question_type, sac_thue, title, content, exam_tricks, source, session_id)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id
+                """, (chunk.get("question_type", "MCQ"), sac_thue, chunk.get("section_title", chunk.get("title", "")),
+                      chunk["content"], chunk.get("tags", ""), f"parsed:{source_file}", session_id))
             else:
                 cur.execute("""
                     INSERT INTO kb_regulation (sac_thue, regulation_ref, content, tags, syllabus_ids, source_file, session_id)
@@ -221,3 +240,123 @@ def save_parsed_chunks(session_id: int, data: dict):
             saved.append(cur.fetchone()[0])
 
     return {"saved": len(saved), "ids": saved}
+
+
+@router.delete("/{session_id}")
+def delete_session(session_id: int):
+    """Delete a session and all its related data."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        # Ensure not deleting the last session
+        cur.execute("SELECT COUNT(*) FROM exam_sessions")
+        if cur.fetchone()[0] <= 1:
+            raise HTTPException(400, "Cannot delete the last session")
+        # Get session folder
+        cur.execute("SELECT folder_path FROM exam_sessions WHERE id = %s", (session_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Session not found")
+        folder_path = row[0]
+        # Delete related records
+        cur.execute("DELETE FROM kb_syllabus WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM kb_regulation WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM kb_sample WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM generation_log WHERE question_id IN (SELECT id FROM questions WHERE session_id = %s)", (session_id,))
+        cur.execute("DELETE FROM questions WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM regulations WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM exam_sessions WHERE id = %s", (session_id,))
+    # Remove folder
+    if folder_path:
+        full_path = os.path.join(DATA_DIR, folder_path)
+        if os.path.isdir(full_path):
+            shutil.rmtree(full_path, ignore_errors=True)
+    return {"ok": True}
+
+
+@router.get("/{session_id}/stats")
+def session_stats(session_id: int):
+    """Get counts for delete confirmation."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        counts = {}
+        for table, col in [('kb_syllabus', 'syllabus'), ('kb_regulation', 'regulations'),
+                           ('kb_sample', 'samples'), ('questions', 'questions'), ('regulations', 'files')]:
+            cur.execute(f"SELECT COUNT(*) FROM {table} WHERE session_id = %s", (session_id,))
+            counts[col] = cur.fetchone()[0]
+    return counts
+
+
+DOC_TYPE_SUBFOLDER = {
+    "regulation": "regulations",
+    "syllabus": "syllabus",
+    "sample_questions": "samples",
+}
+
+
+@router.post("/{session_id}/upload-doc")
+async def upload_doc(session_id: int, doc_type: str = Form(...), sac_thue: str = Form("CIT"), file: UploadFile = File(...)):
+    """Upload a document file into the session's folder."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT folder_path FROM exam_sessions WHERE id = %s", (session_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Session not found")
+        folder_path = row[0]
+
+    subfolder = DOC_TYPE_SUBFOLDER.get(doc_type, "regulations")
+    dest_dir = os.path.join(DATA_DIR, folder_path, subfolder)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = os.path.join(dest_dir, file.filename)
+
+    content = await file.read()
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    rel_path = f"{folder_path}/{subfolder}/{file.filename}"
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO regulations (sac_thue, file_path, file_name, doc_type, session_id, is_active) "
+            "VALUES (%s, %s, %s, %s, %s, TRUE) RETURNING id",
+            (sac_thue, rel_path, file.filename, doc_type, session_id)
+        )
+        reg_id = cur.fetchone()[0]
+
+    return {"id": reg_id, "file_name": file.filename, "file_path": rel_path, "doc_type": doc_type}
+
+
+@router.get("/{session_id}/files")
+def list_session_files(session_id: int, doc_type: Optional[str] = None):
+    """List uploaded files for a session, optionally filtered by doc_type."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        query = "SELECT id, sac_thue, file_name, file_path, doc_type, is_active, uploaded_at FROM regulations WHERE session_id = %s"
+        params = [session_id]
+        if doc_type:
+            query += " AND doc_type = %s"
+            params.append(doc_type)
+        query += " ORDER BY uploaded_at DESC"
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+
+
+@router.delete("/{session_id}/files/{file_id}")
+def delete_session_file(session_id: int, file_id: int):
+    """Delete an uploaded file."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT file_path FROM regulations WHERE id = %s AND session_id = %s", (file_id, session_id))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "File not found")
+        file_path = row[0]
+        cur.execute("DELETE FROM regulations WHERE id = %s", (file_id,))
+    # Remove physical file
+    full_path = os.path.join(DATA_DIR, file_path)
+    if os.path.isfile(full_path):
+        os.remove(full_path)
+    return {"ok": True}

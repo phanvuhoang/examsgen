@@ -12,6 +12,8 @@ def list_questions(
     question_type: Optional[str] = None,
     sac_thue: Optional[str] = None,
     starred: Optional[bool] = None,
+    session_id: Optional[int] = None,
+    user_id: Optional[int] = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
 ):
@@ -26,6 +28,12 @@ def list_questions(
     if starred is not None:
         conditions.append("is_starred = %s")
         params.append(starred)
+    if session_id:
+        conditions.append("session_id = %s")
+        params.append(session_id)
+    if user_id:
+        conditions.append("user_id = %s")
+        params.append(user_id)
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
 

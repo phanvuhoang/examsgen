@@ -21,6 +21,8 @@ export default function KnowledgeBase() {
   const [showParse, setShowParse] = useState(false)
   const [sessions, setSessions] = useState([])
   const [currentSession, setCurrentSession] = useState(null)
+  const [files, setFiles] = useState([])
+  const [uploading, setUploading] = useState(false)
 
   // Load sessions and resolve current
   useEffect(() => {
@@ -33,6 +35,35 @@ export default function KnowledgeBase() {
   }, [])
 
   const sessionId = currentSession?.id
+  const TAB_DOC_TYPE = ['syllabus', 'regulation', 'sample_questions']
+
+  const fetchFiles = async () => {
+    if (!sessionId) return
+    try {
+      setFiles(await api.getSessionFiles(sessionId, TAB_DOC_TYPE[tab]))
+    } catch { setFiles([]) }
+  }
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file || !sessionId) return
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('doc_type', TAB_DOC_TYPE[tab])
+      formData.append('sac_thue', sacThue || 'CIT')
+      await api.uploadSessionDoc(sessionId, formData)
+      fetchFiles()
+    } catch (err) { alert('Upload failed: ' + err.message) }
+    finally { setUploading(false); e.target.value = '' }
+  }
+
+  const handleDeleteFile = async (fileId) => {
+    if (!confirm('Delete this file?')) return
+    await api.deleteSessionFile(sessionId, fileId)
+    fetchFiles()
+  }
 
   const fetchItems = async () => {
     setLoading(true)
@@ -55,7 +86,7 @@ export default function KnowledgeBase() {
     }
   }
 
-  useEffect(() => { if (sessionId) fetchItems() }, [tab, sacThue, search, sessionId])
+  useEffect(() => { if (sessionId) { fetchItems(); fetchFiles() } }, [tab, sacThue, search, sessionId])
 
   const resetForm = () => {
     if (tab === 0) setForm({ sac_thue: 'CIT', section_code: '', section_title: '', content: '', tags: '', session_id: sessionId })
@@ -202,6 +233,40 @@ export default function KnowledgeBase() {
           </button>
         )}
       </div>
+
+      {/* Uploaded Files */}
+      {sessionId && (
+        <div className="bg-white border rounded-xl p-4 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-semibold text-gray-600">Uploaded Files</h4>
+            <label className={`px-3 py-1.5 bg-brand-500 text-white text-xs rounded-lg hover:bg-brand-600 cursor-pointer ${uploading ? 'opacity-50' : ''}`}>
+              {uploading ? 'Uploading...' : '+ Upload File'}
+              <input type="file" accept=".doc,.docx" onChange={handleUpload} className="hidden" disabled={uploading} />
+            </label>
+          </div>
+          {files.length === 0 ? (
+            <p className="text-xs text-gray-400">No files uploaded yet.</p>
+          ) : (
+            <div className="space-y-1">
+              {files.map((f) => (
+                <div key={f.id} className="flex items-center justify-between text-sm py-1.5 px-2 rounded hover:bg-gray-50">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-400">&#128196;</span>
+                    <span className="font-medium text-gray-700">{f.file_name}</span>
+                    <span className="bg-gray-100 text-xs px-1.5 py-0.5 rounded">{f.sac_thue}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setShowParse(true) }}
+                      className="text-xs text-purple-600 hover:underline">Parse</button>
+                    <button onClick={() => handleDeleteFile(f.id)}
+                      className="text-xs text-red-500 hover:underline">Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Parse & Match Panel */}
       {showParse && sessionId && (

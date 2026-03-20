@@ -46,17 +46,17 @@ TAX YEAR: {session['tax_year']}"""
 def _save_question(question_type, sac_thue, question_part, question_number,
                    content_json, content_html, model_used, provider_used,
                    exam_session, duration_ms, prompt_tokens, completion_tokens,
-                   session_id=None):
+                   session_id=None, user_id=1):
     """Save question and generation log to DB. Returns question id."""
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO questions (question_type, sac_thue, question_part, question_number, "
-            "content_json, content_html, model_used, provider_used, exam_session, session_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            "content_json, content_html, model_used, provider_used, exam_session, session_id, user_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (question_type, sac_thue, question_part, question_number,
              json.dumps(content_json), content_html, model_used, provider_used, exam_session,
-             session_id),
+             session_id, user_id),
         )
         q_id = cur.fetchone()[0]
         cur.execute(
@@ -120,7 +120,7 @@ def generate_mcq(req: MCQGenerateRequest):
             session_context=session_ctx,
         )
 
-        result = call_ai(prompt, model_tier=req.model_tier, system_prompt=MCQ_SYSTEM)
+        result = call_ai(prompt, model_tier=req.model_tier, system_prompt=MCQ_SYSTEM, provider=req.provider)
         content_json = parse_ai_json(result["content"])
         content_html = render_question_html(content_json)
         duration_ms = int((time.time() - start) * 1000)
@@ -131,7 +131,7 @@ def generate_mcq(req: MCQGenerateRequest):
             result["model"], result["provider"],
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
-            session_id=session.get("id"),
+            session_id=session.get("id"), user_id=req.user_id,
         )
 
         return {
@@ -188,7 +188,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             session_context=session_ctx,
         )
 
-        result = call_ai(prompt, model_tier=req.model_tier, system_prompt=SCENARIO_SYSTEM)
+        result = call_ai(prompt, model_tier=req.model_tier, system_prompt=SCENARIO_SYSTEM, provider=req.provider)
         content_json = parse_ai_json(result["content"])
         content_html = render_question_html(content_json)
         duration_ms = int((time.time() - start) * 1000)
@@ -199,7 +199,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             result["model"], result["provider"],
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
-            session_id=session.get("id"),
+            session_id=session.get("id"), user_id=req.user_id,
         )
 
         return {
@@ -251,7 +251,7 @@ def generate_longform(req: LongformGenerateRequest):
             session_context=session_ctx,
         )
 
-        result = call_ai(prompt, model_tier=req.model_tier, system_prompt=LONGFORM_SYSTEM)
+        result = call_ai(prompt, model_tier=req.model_tier, system_prompt=LONGFORM_SYSTEM, provider=req.provider)
         content_json = parse_ai_json(result["content"])
         content_html = render_question_html(content_json)
         duration_ms = int((time.time() - start) * 1000)
@@ -262,7 +262,7 @@ def generate_longform(req: LongformGenerateRequest):
             result["model"], result["provider"],
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
-            session_id=session.get("id"),
+            session_id=session.get("id"), user_id=req.user_id,
         )
 
         return {
@@ -315,7 +315,7 @@ Before the JSON, write 1-2 sentences explaining what you changed."""
         messages = messages[:2] + messages[-16:]
 
     try:
-        result = call_ai(messages=messages, model_tier=req.model_tier, system_prompt=system)
+        result = call_ai(messages=messages, model_tier=req.model_tier, system_prompt=system, provider=req.provider)
         raw = result["content"]
 
         # Extract assistant note (text before JSON)

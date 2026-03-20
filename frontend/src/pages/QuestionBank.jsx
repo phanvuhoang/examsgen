@@ -12,10 +12,15 @@ const SAC_THUE_OPTIONS = ['', 'CIT', 'VAT', 'PIT', 'FCT', 'TP', 'ADMIN']
 export default function QuestionBank() {
   const [questions, setQuestions] = useState([])
   const [total, setTotal] = useState(0)
-  const [filters, setFilters] = useState({ question_type: '', sac_thue: '', starred: '' })
+  const [filters, setFilters] = useState({ question_type: '', sac_thue: '', starred: '', session_id: '' })
   const [selected, setSelected] = useState(new Set())
   const [viewing, setViewing] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [sessions, setSessions] = useState([])
+
+  useEffect(() => {
+    api.getSessions().then(setSessions).catch(() => {})
+  }, [])
 
   const load = async () => {
     setLoading(true)
@@ -24,6 +29,7 @@ export default function QuestionBank() {
       if (filters.question_type) params.question_type = filters.question_type
       if (filters.sac_thue) params.sac_thue = filters.sac_thue
       if (filters.starred === 'true') params.starred = true
+      if (filters.session_id) params.session_id = filters.session_id
       const data = await api.getQuestions(params)
       setQuestions(data.questions)
       setTotal(data.total)
@@ -86,6 +92,12 @@ export default function QuestionBank() {
 
       {/* Filters */}
       <div className="flex gap-3 mb-5">
+        <select value={filters.session_id}
+          onChange={(e) => setFilters({ ...filters, session_id: e.target.value })}
+          className="border rounded-lg px-3 py-2 text-sm">
+          <option value="">All Sessions</option>
+          {sessions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
         <select value={filters.question_type}
           onChange={(e) => setFilters({ ...filters, question_type: e.target.value })}
           className="border rounded-lg px-3 py-2 text-sm">

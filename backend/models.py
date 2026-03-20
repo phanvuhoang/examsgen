@@ -13,12 +13,14 @@ class MCQGenerateRequest(BaseModel):
     exam_session: str = "Jun2026"
     difficulty: str = "standard"
     model_tier: str = "fast"   # fast=sonnet, strong=opus
+    provider: Optional[str] = None  # None=auto, "claudible", "anthropic", "openai"
     reference_question_id: Optional[int] = None
     custom_instructions: Optional[str] = None
     kb_syllabus_ids: Optional[List[int]] = None
     kb_regulation_ids: Optional[List[int]] = None
     kb_sample_ids: Optional[List[int]] = None
     session_id: Optional[int] = None
+    user_id: int = 1  # future: from auth token
 
 
 class ScenarioGenerateRequest(BaseModel):
@@ -28,12 +30,14 @@ class ScenarioGenerateRequest(BaseModel):
     exam_session: str = "Jun2026"
     scenario_industry: Optional[str] = None
     model_tier: str = "strong"  # default opus for scenario
+    provider: Optional[str] = None
     reference_question_id: Optional[int] = None
     custom_instructions: Optional[str] = None
     kb_syllabus_ids: Optional[List[int]] = None
     kb_regulation_ids: Optional[List[int]] = None
     kb_sample_ids: Optional[List[int]] = None
     session_id: Optional[int] = None
+    user_id: int = 1
 
 
 class LongformGenerateRequest(BaseModel):
@@ -42,12 +46,14 @@ class LongformGenerateRequest(BaseModel):
     marks: int = 15
     exam_session: str = "Jun2026"
     model_tier: str = "strong"  # default opus for longform
+    provider: Optional[str] = None
     reference_question_id: Optional[int] = None
     custom_instructions: Optional[str] = None
     kb_syllabus_ids: Optional[List[int]] = None
     kb_regulation_ids: Optional[List[int]] = None
     kb_sample_ids: Optional[List[int]] = None
     session_id: Optional[int] = None
+    user_id: int = 1
 
 
 class RefineRequest(BaseModel):
@@ -55,6 +61,7 @@ class RefineRequest(BaseModel):
     conversation_history: List[dict]  # [{role: "user"|"assistant", content: str}]
     user_message: str
     model_tier: str = "fast"
+    provider: Optional[str] = None
     sac_thue: str
     question_type: str
 

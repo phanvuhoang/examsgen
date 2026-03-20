@@ -19,6 +19,7 @@ export default function Generate() {
   const [industry, setIndustry] = useState('')
   const [difficulty, setDifficulty] = useState('standard')
   const [modelTier, setModelTier] = useState('fast')
+  const [provider, setProvider] = useState('')
   const [showCustom, setShowCustom] = useState(false)
   const [referenceId, setReferenceId] = useState('')
   const [customInstructions, setCustomInstructions] = useState('')
@@ -74,6 +75,7 @@ export default function Generate() {
         kb_regulation_ids: kbRegulationIds.length ? kbRegulationIds : null,
         kb_sample_ids: kbSampleIds.length ? kbSampleIds : null,
         session_id: currentSession?.id || null,
+        provider: provider || null,
       }
       let data
       if (type === 'mcq') {
@@ -213,11 +215,20 @@ export default function Generate() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">AI Model</label>
-                  <select value={modelTier} onChange={(e) => setModelTier(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2">
-                    <option value="fast">Sonnet — faster</option>
-                    <option value="strong">Opus — best quality</option>
+                  <label className="block text-sm font-medium mb-1">AI Provider + Model</label>
+                  <select value={`${provider || 'auto'}|${modelTier}`} onChange={(e) => {
+                    const [p, t] = e.target.value.split('|')
+                    setProvider(p === 'auto' ? '' : p)
+                    setModelTier(t)
+                  }} className="w-full border rounded-lg px-3 py-2">
+                    <option value="auto|fast">Auto — Sonnet (fast)</option>
+                    <option value="auto|strong">Auto — Opus (best)</option>
+                    <option value="claudible|fast">Claudible — Sonnet</option>
+                    <option value="claudible|strong">Claudible — Opus</option>
+                    <option value="anthropic|fast">Anthropic — Sonnet</option>
+                    <option value="anthropic|strong">Anthropic — Opus</option>
+                    <option value="openai|fast">OpenAI — Fast</option>
+                    <option value="openai|strong">OpenAI — Strong</option>
                   </select>
                 </div>
               </>
@@ -259,11 +270,25 @@ export default function Generate() {
               </div>
             )}
 
-            <div>
-              <label className="block text-sm font-medium mb-1">Exam Session</label>
-              <input value={examSession} onChange={(e) => setExamSession(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2" />
-            </div>
+            {type !== 'mcq' && (
+              <div>
+                <label className="block text-sm font-medium mb-1">AI Provider + Model</label>
+                <select value={`${provider || 'auto'}|${modelTier}`} onChange={(e) => {
+                  const [p, t] = e.target.value.split('|')
+                  setProvider(p === 'auto' ? '' : p)
+                  setModelTier(t)
+                }} className="w-full border rounded-lg px-3 py-2">
+                  <option value="auto|fast">Auto — Sonnet (fast)</option>
+                  <option value="auto|strong">Auto — Opus (best)</option>
+                  <option value="claudible|fast">Claudible — Sonnet</option>
+                  <option value="claudible|strong">Claudible — Opus</option>
+                  <option value="anthropic|fast">Anthropic — Sonnet</option>
+                  <option value="anthropic|strong">Anthropic — Opus</option>
+                  <option value="openai|fast">OpenAI — Fast</option>
+                  <option value="openai|strong">OpenAI — Strong</option>
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Custom Instructions */}
@@ -418,6 +443,7 @@ export default function Generate() {
           setCurrentContent={setCurrentContent}
           setResult={setResult}
           modelTier={modelTier}
+          provider={provider}
           sac_thue={sac_thue}
           type={type}
         />
@@ -426,7 +452,7 @@ export default function Generate() {
   )
 }
 
-function RefineChat({ chatHistory, setChatHistory, chatInput, setChatInput, chatLoading, setChatLoading, currentContent, setCurrentContent, setResult, modelTier, sac_thue, type }) {
+function RefineChat({ chatHistory, setChatHistory, chatInput, setChatInput, chatLoading, setChatLoading, currentContent, setCurrentContent, setResult, modelTier, provider, sac_thue, type }) {
   useEffect(() => {
     const el = document.getElementById('chat-scroll')
     if (el) el.scrollTop = el.scrollHeight
@@ -444,6 +470,7 @@ function RefineChat({ chatHistory, setChatHistory, chatInput, setChatInput, chat
         conversation_history: chatHistory,
         user_message: chatInput,
         model_tier: modelTier,
+        provider: provider || null,
         sac_thue,
         question_type: type === 'mcq' ? 'MCQ' : type === 'scenario' ? 'SCENARIO_10' : 'LONGFORM_15',
       })

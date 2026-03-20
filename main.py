@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="ExamsGen", description="ACCA TX(VNM) Exam Question Generator")
 
 # Auth middleware
+# TODO: Replace APP_PASSWORD single-user auth with per-user JWT auth
+# user_id should come from JWT token, not hardcoded to 1
 app.add_middleware(AuthMiddleware)
 
 # Routes

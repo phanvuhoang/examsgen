@@ -7,47 +7,55 @@ from backend.config import (
     CLAUDIBLE_BASE_URL, CLAUDIBLE_API_KEY,
     CLAUDIBLE_MODEL_STRONG, CLAUDIBLE_MODEL_FAST,
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL_STRONG, ANTHROPIC_MODEL_FAST,
-    OPENAI_API_KEY, OPENAI_MODEL,
+    OPENAI_API_KEY, OPENAI_MODEL, OPENAI_FAST_MODEL, OPENAI_STRONG_MODEL,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _get_providers(model_tier: str):
-    """Return ordered list of (name, base_url, api_key, model) tuples."""
-    providers = []
+def _get_providers(model_tier: str, provider: str = None):
+    """Return ordered list of (name, base_url, api_key, model) tuples.
+    If provider is specified, return only that provider (no fallback chain).
+    """
+    all_providers = []
     if CLAUDIBLE_API_KEY:
-        providers.append((
+        all_providers.append((
             "claudible",
             CLAUDIBLE_BASE_URL,
             CLAUDIBLE_API_KEY,
             CLAUDIBLE_MODEL_STRONG if model_tier == "strong" else CLAUDIBLE_MODEL_FAST,
         ))
     if ANTHROPIC_API_KEY:
-        providers.append((
+        all_providers.append((
             "anthropic",
             "https://api.anthropic.com/v1",
             ANTHROPIC_API_KEY,
             ANTHROPIC_MODEL_STRONG if model_tier == "strong" else ANTHROPIC_MODEL_FAST,
         ))
     if OPENAI_API_KEY:
-        providers.append((
+        all_providers.append((
             "openai",
             "https://api.openai.com/v1",
             OPENAI_API_KEY,
-            OPENAI_MODEL,
+            OPENAI_STRONG_MODEL if model_tier == "strong" else OPENAI_FAST_MODEL,
         ))
-    return providers
+
+    if provider:
+        filtered = [p for p in all_providers if p[0] == provider]
+        return filtered if filtered else all_providers
+
+    return all_providers
 
 
-def call_ai(prompt: str = None, model_tier: str = "strong", system_prompt: str = None, messages: list = None) -> dict:
+def call_ai(prompt: str = None, model_tier: str = "strong", system_prompt: str = None, messages: list = None, provider: str = None) -> dict:
     """Call AI with fallback chain. Returns dict with content, model, provider, tokens.
 
     Can be called with either:
     - prompt (str): Single user message
     - messages (list): Full conversation history [{role, content}, ...]
+    - provider (str): If specified, use only that provider (no fallback)
     """
-    providers = _get_providers(model_tier)
+    providers = _get_providers(model_tier, provider=provider)
     if not providers:
         raise Exception("No AI providers configured — set at least one API key")
 

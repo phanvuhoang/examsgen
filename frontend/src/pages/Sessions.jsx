@@ -64,10 +64,27 @@ export default function Sessions() {
     finally { setSaving(false) }
   }
 
-  const handleSetDefault = async (id) => {
-    await api.setDefaultSession(id)
-    localStorage.setItem('currentSessionId', id)
-    fetchSessions()
+  const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [deleteStats, setDeleteStats] = useState(null)
+
+  const handleDeleteClick = async (session) => {
+    try {
+      const stats = await api.sessionStats(session.id)
+      setDeleteStats(stats)
+      setDeleteConfirm(session)
+    } catch { setDeleteConfirm(session); setDeleteStats(null) }
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteConfirm) return
+    try {
+      await api.deleteSession(deleteConfirm.id)
+      if (localStorage.getItem('currentSessionId') === String(deleteConfirm.id)) {
+        localStorage.removeItem('currentSessionId')
+      }
+      setDeleteConfirm(null)
+      fetchSessions()
+    } catch (err) { alert('Delete failed: ' + err.message) }
   }
 
   const handleClone = async (targetId, sourceId) => {
@@ -170,13 +187,11 @@ export default function Sessions() {
                   <span className="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full">Active</span>
                 )}
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-2">
                 <button onClick={() => handleEdit(s)}
                   className="text-xs text-brand-600 hover:underline">Edit</button>
-                {!s.is_default && (
-                  <button onClick={() => handleSetDefault(s.id)}
-                    className="text-xs text-blue-600 hover:underline ml-2">Set Active</button>
-                )}
+                <button onClick={() => handleDeleteClick(s)}
+                  className="text-xs text-red-500 hover:underline">Delete</button>
               </div>
             </div>
 
@@ -212,6 +227,32 @@ export default function Sessions() {
           </div>
         ))}
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+            <h3 className="font-semibold text-lg mb-2">Delete "{deleteConfirm.name}"?</h3>
+            <p className="text-sm text-gray-600 mb-3">This will permanently delete:</p>
+            {deleteStats && (
+              <ul className="text-sm text-gray-700 space-y-1 mb-3">
+                <li>&#8226; {deleteStats.syllabus} syllabus items</li>
+                <li>&#8226; {deleteStats.regulations} regulation chunks</li>
+                <li>&#8226; {deleteStats.samples} sample questions</li>
+                <li>&#8226; {deleteStats.questions} generated questions</li>
+                <li>&#8226; {deleteStats.files} uploaded files</li>
+              </ul>
+            )}
+            <p className="text-xs text-red-600 font-medium mb-4">This cannot be undone.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteConfirm(null)}
+                className="px-4 py-2 border text-sm rounded-lg hover:bg-gray-50">Cancel</button>
+              <button onClick={handleDeleteConfirm}
+                className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">Delete permanently</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

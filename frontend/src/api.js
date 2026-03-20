@@ -134,12 +134,32 @@ export const api = {
     request(`/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   setDefaultSession: (id) =>
     request(`/sessions/${id}/set-default`, { method: 'POST' }),
+  deleteSession: (id) =>
+    request(`/sessions/${id}`, { method: 'DELETE' }),
+  sessionStats: (id) => request(`/sessions/${id}/stats`),
   cloneSession: (targetId, sourceId) =>
     request(`/sessions/${targetId}/clone-from/${sourceId}`, { method: 'POST' }),
   parseAndMatch: (sessionId, data) =>
     request(`/sessions/${sessionId}/parse-and-match`, { method: 'POST', body: JSON.stringify(data) }),
   saveParsedChunks: (sessionId, data) =>
     request(`/sessions/${sessionId}/save-parsed-chunks`, { method: 'POST', body: JSON.stringify(data) }),
+  getSessionFiles: (sessionId, docType) => {
+    const q = docType ? `?doc_type=${docType}` : ''
+    return request(`/sessions/${sessionId}/files${q}`)
+  },
+  uploadSessionDoc: (sessionId, formData) => {
+    const token = localStorage.getItem('token')
+    return fetch(`${API_BASE}/sessions/${sessionId}/upload-doc`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    }).then((r) => {
+      if (!r.ok) throw new Error('Upload failed')
+      return r.json()
+    })
+  },
+  deleteSessionFile: (sessionId, fileId) =>
+    request(`/sessions/${sessionId}/files/${fileId}`, { method: 'DELETE' }),
 
   // Export
   exportWord: (questionIds) =>

@@ -15,6 +15,8 @@ ANTHROPIC_MODEL_FAST = os.getenv("ANTHROPIC_MODEL_FAST", "claude-sonnet-4-5")
 # AI — Secondary fallback (OpenAI)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
+OPENAI_FAST_MODEL = os.getenv("OPENAI_FAST_MODEL", "gpt-4o-mini")
+OPENAI_STRONG_MODEL = os.getenv("OPENAI_STRONG_MODEL", "gpt-4o")
 
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://legaldb_user:password@10.0.1.11:5432/examsgen")
