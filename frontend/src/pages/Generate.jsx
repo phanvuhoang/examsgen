@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
+import KBMultiSelect from '../components/KBMultiSelect'
 
 const SAC_THUE_OPTIONS = ['CIT', 'VAT', 'PIT', 'FCT', 'TP', 'ADMIN']
 const QUESTION_MAP = {
@@ -22,9 +23,16 @@ export default function Generate() {
   const [referenceId, setReferenceId] = useState('')
   const [customInstructions, setCustomInstructions] = useState('')
   const [referenceOptions, setReferenceOptions] = useState([])
+  const [kbSyllabusIds, setKbSyllabusIds] = useState([])
+  const [kbRegulationIds, setKbRegulationIds] = useState([])
+  const [kbSampleIds, setKbSampleIds] = useState([])
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
+  const [chatHistory, setChatHistory] = useState([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [currentContent, setCurrentContent] = useState(null)
 
   useEffect(() => {
     const t = searchParams.get('type')
@@ -51,6 +59,11 @@ export default function Generate() {
     setError('')
     setResult(null)
     try {
+      const kbFields = {
+        kb_syllabus_ids: kbSyllabusIds.length ? kbSyllabusIds : null,
+        kb_regulation_ids: kbRegulationIds.length ? kbRegulationIds : null,
+        kb_sample_ids: kbSampleIds.length ? kbSampleIds : null,
+      }
       let data
       if (type === 'mcq') {
         data = await api.generateMCQ({
@@ -62,6 +75,7 @@ export default function Generate() {
           model_tier: modelTier,
           reference_question_id: referenceId ? parseInt(referenceId) : null,
           custom_instructions: customInstructions || null,
+          ...kbFields,
         })
       } else if (type === 'scenario') {
         data = await api.generateScenario({
@@ -73,6 +87,7 @@ export default function Generate() {
           model_tier: modelTier,
           reference_question_id: referenceId ? parseInt(referenceId) : null,
           custom_instructions: customInstructions || null,
+          ...kbFields,
         })
       } else if (type === 'longform') {
         data = await api.generateLongform({
@@ -83,9 +98,12 @@ export default function Generate() {
           model_tier: modelTier,
           reference_question_id: referenceId ? parseInt(referenceId) : null,
           custom_instructions: customInstructions || null,
+          ...kbFields,
         })
       }
       setResult(data)
+      setCurrentContent(data.content_json)
+      setChatHistory([{ role: 'assistant', content: 'Question ready! Ask me to adjust anything — in English or Vietnamese.' }])
     } catch (err) {
       setError(err.message || 'Generation failed')
     } finally {
@@ -275,6 +293,37 @@ export default function Generate() {
                     Supports English and Vietnamese. Paste a question to replicate, or describe in your own words.
                   </p>
                 </div>
+
+                {/* KB Targeting */}
+                <div className="border-t pt-4 mt-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                    Knowledge Base Targeting
+                  </p>
+                  <KBMultiSelect
+                    label="Syllabus items to test"
+                    endpoint={`/api/kb/syllabus?sac_thue=${sac_thue}`}
+                    value={kbSyllabusIds}
+                    onChange={setKbSyllabusIds}
+                    displayKey="section_title"
+                    hintKey="tags"
+                  />
+                  <KBMultiSelect
+                    label="Regulation paragraphs"
+                    endpoint={`/api/kb/regulations?sac_thue=${sac_thue}`}
+                    value={kbRegulationIds}
+                    onChange={setKbRegulationIds}
+                    displayKey="regulation_ref"
+                    hintKey="tags"
+                  />
+                  <KBMultiSelect
+                    label="Style references (sample questions)"
+                    endpoint={`/api/kb/samples?sac_thue=${sac_thue}&question_type=${type === 'mcq' ? 'MCQ' : type === 'scenario' ? 'SCENARIO_10' : 'LONGFORM_15'}`}
+                    value={kbSampleIds}
+                    onChange={setKbSampleIds}
+                    displayKey="title"
+                    hintKey="exam_tricks"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -312,7 +361,7 @@ export default function Generate() {
                 className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600">
                 Export Word
               </button>
-              <button onClick={handleGenerate}
+              <button onClick={() => { setChatHistory([]); setCurrentContent(null); handleGenerate() }}
                 className="px-4 py-2 border text-sm rounded-lg hover:bg-gray-50">
                 Regenerate
               </button>
@@ -334,6 +383,104 @@ export default function Generate() {
           />
         </div>
       )}
+
+      {/* Refine Chat */}
+      {result && (
+        <RefineChat
+          chatHistory={chatHistory}
+          setChatHistory={setChatHistory}
+          chatInput={chatInput}
+          setChatInput={setChatInput}
+          chatLoading={chatLoading}
+          setChatLoading={setChatLoading}
+          currentContent={currentContent}
+          setCurrentContent={setCurrentContent}
+          setResult={setResult}
+          modelTier={modelTier}
+          sac_thue={sac_thue}
+          type={type}
+        />
+      )}
+    </div>
+  )
+}
+
+function RefineChat({ chatHistory, setChatHistory, chatInput, setChatInput, chatLoading, setChatLoading, currentContent, setCurrentContent, setResult, modelTier, sac_thue, type }) {
+  useEffect(() => {
+    const el = document.getElementById('chat-scroll')
+    if (el) el.scrollTop = el.scrollHeight
+  }, [chatHistory, chatLoading])
+
+  const handleRefine = async () => {
+    if (!chatInput.trim() || chatLoading) return
+    const userMsg = { role: 'user', content: chatInput }
+    setChatHistory((prev) => [...prev, userMsg])
+    setChatInput('')
+    setChatLoading(true)
+    try {
+      const data = await api.refineQuestion({
+        current_content: currentContent,
+        conversation_history: chatHistory,
+        user_message: chatInput,
+        model_tier: modelTier,
+        sac_thue,
+        question_type: type === 'mcq' ? 'MCQ' : type === 'scenario' ? 'SCENARIO_10' : 'LONGFORM_15',
+      })
+      setResult((prev) => ({ ...prev, content_json: data.content, content_html: data.content_html }))
+      setCurrentContent(data.content)
+      setChatHistory((prev) => [...prev, { role: 'assistant', content: data.assistant_message }])
+    } catch {
+      setChatHistory((prev) => [...prev, { role: 'assistant', content: 'Refinement failed. Please try again.' }])
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  return (
+    <div className="mt-6 border rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-gray-50 px-4 py-2 border-b flex items-center gap-2">
+        <span className="text-sm font-semibold text-gray-700">Refine this question</span>
+        <span className="text-xs text-gray-400">English or Vietnamese</span>
+      </div>
+
+      <div className="p-4 space-y-3 max-h-72 overflow-y-auto" id="chat-scroll">
+        {chatHistory.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[85%] px-3 py-2 rounded-lg text-sm leading-relaxed ${
+              msg.role === 'user'
+                ? 'bg-[#028a39] text-white'
+                : 'bg-gray-100 text-gray-700'
+            }`}>
+              {msg.content}
+            </div>
+          </div>
+        ))}
+        {chatLoading && (
+          <div className="flex justify-start">
+            <div className="bg-gray-100 text-gray-500 px-3 py-2 rounded-lg text-sm animate-pulse">
+              Updating question...
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t p-3 flex gap-2">
+        <input
+          value={chatInput}
+          onChange={(e) => setChatInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleRefine()}
+          placeholder="E.g: Make harder, add loss carry-forward..."
+          className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#028a39]"
+          disabled={chatLoading}
+        />
+        <button
+          onClick={handleRefine}
+          disabled={chatLoading || !chatInput.trim()}
+          className="px-4 py-2 bg-[#028a39] text-white rounded-lg text-sm font-medium hover:bg-[#027a32] disabled:opacity-40 transition-colors"
+        >
+          Send
+        </button>
+      </div>
     </div>
   )
 }

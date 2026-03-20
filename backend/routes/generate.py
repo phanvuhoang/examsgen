@@ -3,9 +3,9 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException
 
-from backend.models import MCQGenerateRequest, ScenarioGenerateRequest, LongformGenerateRequest
+from backend.models import MCQGenerateRequest, ScenarioGenerateRequest, LongformGenerateRequest, RefineRequest
 from backend.ai_provider import call_ai, parse_ai_json
-from backend.context_builder import build_context, get_reference_content
+from backend.context_builder import build_context, get_reference_content, build_kb_context
 from backend.prompts import (
     MCQ_SYSTEM, MCQ_PROMPT,
     SCENARIO_SYSTEM, SCENARIO_PROMPT,
@@ -71,6 +71,11 @@ def generate_mcq(req: MCQGenerateRequest):
             reference_question_id=req.reference_question_id,
             custom_instructions=req.custom_instructions,
         )
+        kb_block = build_kb_context(
+            kb_syllabus_ids=req.kb_syllabus_ids,
+            kb_regulation_ids=req.kb_regulation_ids,
+            kb_sample_ids=req.kb_sample_ids,
+        )
 
         prompt = MCQ_PROMPT.format(
             count=req.count,
@@ -82,6 +87,7 @@ def generate_mcq(req: MCQGenerateRequest):
             sample=ctx["sample"],
             topics_instruction=topics_instruction,
             custom_instructions=custom_block,
+            kb_context=kb_block,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=MCQ_SYSTEM)
@@ -127,6 +133,11 @@ def generate_scenario(req: ScenarioGenerateRequest):
             reference_question_id=req.reference_question_id,
             custom_instructions=req.custom_instructions,
         )
+        kb_block = build_kb_context(
+            kb_syllabus_ids=req.kb_syllabus_ids,
+            kb_regulation_ids=req.kb_regulation_ids,
+            kb_sample_ids=req.kb_sample_ids,
+        )
 
         prompt = SCENARIO_PROMPT.format(
             question_number=req.question_number,
@@ -140,6 +151,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             industry_instruction=industry_instruction,
             question_type="SCENARIO_10",
             custom_instructions=custom_block,
+            kb_context=kb_block,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=SCENARIO_SYSTEM)
@@ -182,6 +194,11 @@ def generate_longform(req: LongformGenerateRequest):
             reference_question_id=req.reference_question_id,
             custom_instructions=req.custom_instructions,
         )
+        kb_block = build_kb_context(
+            kb_syllabus_ids=req.kb_syllabus_ids,
+            kb_regulation_ids=req.kb_regulation_ids,
+            kb_sample_ids=req.kb_sample_ids,
+        )
 
         prompt = LONGFORM_PROMPT.format(
             question_number=req.question_number,
@@ -193,6 +210,7 @@ def generate_longform(req: LongformGenerateRequest):
             regulations=ctx["regulations"],
             sample=ctx["sample"],
             custom_instructions=custom_block,
+            kb_context=kb_block,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=LONGFORM_SYSTEM)
@@ -222,4 +240,58 @@ def generate_longform(req: LongformGenerateRequest):
         duration_ms = int((time.time() - start) * 1000)
         _log_failure("LONGFORM_15", req.sac_thue, e, duration_ms)
         logger.error(f"Longform generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/refine")
+def refine_question(req: RefineRequest):
+    """Refine a generated question via conversational chat."""
+    import json as _json
+
+    system = """You are a senior ACCA TX(VNM) examiner refining an exam question based on the user's feedback.
+Return the COMPLETE updated question in the EXACT SAME JSON format as the input — do not omit any fields.
+Only change what the user asks to change.
+You can understand and respond to instructions in both English and Vietnamese.
+Before the JSON, write 1-2 sentences explaining what you changed."""
+
+    current_q_str = _json.dumps(req.current_content, ensure_ascii=False, indent=2)
+
+    messages = [
+        {"role": "user", "content": f"Here is the current question JSON:\n\n{current_q_str}"},
+        {"role": "assistant", "content": "I have the question. What would you like me to change?"}
+    ]
+
+    # Add conversation history
+    for msg in req.conversation_history:
+        if not (msg["role"] == "assistant" and "What would you like" in msg.get("content", "")):
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
+    messages.append({
+        "role": "user",
+        "content": req.user_message + "\n\nReturn your explanation followed by the complete updated JSON."
+    })
+
+    # Trim history if too long (keep last 8 exchanges)
+    if len(messages) > 18:
+        messages = messages[:2] + messages[-16:]
+
+    try:
+        result = call_ai(messages=messages, model_tier=req.model_tier, system_prompt=system)
+        raw = result["content"]
+
+        # Extract assistant note (text before JSON)
+        json_start = raw.find('{')
+        assistant_note = raw[:json_start].strip() if json_start > 5 else "Question updated!"
+        updated_content = parse_ai_json(raw)
+        content_html = render_question_html(updated_content)
+
+        return {
+            "content": updated_content,
+            "content_html": content_html,
+            "assistant_message": assistant_note,
+            "model_used": result["model"],
+            "provider_used": result["provider"],
+        }
+    except Exception as e:
+        logger.error(f"Refine failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

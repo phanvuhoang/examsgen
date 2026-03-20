@@ -40,16 +40,25 @@ def _get_providers(model_tier: str):
     return providers
 
 
-def call_ai(prompt: str, model_tier: str = "strong", system_prompt: str = None) -> dict:
-    """Call AI with fallback chain. Returns dict with content, model, provider, tokens."""
+def call_ai(prompt: str = None, model_tier: str = "strong", system_prompt: str = None, messages: list = None) -> dict:
+    """Call AI with fallback chain. Returns dict with content, model, provider, tokens.
+
+    Can be called with either:
+    - prompt (str): Single user message
+    - messages (list): Full conversation history [{role, content}, ...]
+    """
     providers = _get_providers(model_tier)
     if not providers:
         raise Exception("No AI providers configured — set at least one API key")
 
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+    if messages is None:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+    else:
+        if system_prompt:
+            messages = [{"role": "system", "content": system_prompt}] + messages
 
     last_error = None
     for provider_name, base_url, api_key, model in providers:
@@ -157,3 +166,63 @@ def parse_ai_json(content: str) -> dict:
 
 
 import re
+
+
+def parse_ai_json_list(content: str) -> list:
+    """Parse JSON array from AI response, handling markdown code blocks and truncation."""
+    content = content.strip()
+
+    # Strip markdown code fences
+    if content.startswith("```"):
+        lines = content.split("\n")
+        lines = lines[1:]  # remove opening ```json
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        content = "\n".join(lines)
+
+    content = content.strip()
+
+    # Try direct parse first
+    try:
+        result = json.loads(content)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find JSON array boundaries
+    start = content.find('[')
+    if start == -1:
+        raise ValueError("No JSON array found in AI response")
+
+    text = content[start:]
+    try:
+        result = json.loads(text)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Try closing with common endings
+    for suffix in [']', '}]', '"}]', '"}}]']:
+        try:
+            result = json.loads(text + suffix)
+            if isinstance(result, list):
+                return result
+        except Exception:
+            pass
+
+    # Last resort: find last valid JSON subset
+    for i in range(len(text), max(len(text) // 2, 100), -1):
+        try:
+            candidate = text[:i]
+            open_braces = candidate.count('{') - candidate.count('}')
+            open_brackets = candidate.count('[') - candidate.count(']')
+            closed = candidate + ('}' * open_braces) + (']' * open_brackets)
+            result = json.loads(closed)
+            if isinstance(result, list):
+                return result
+        except Exception:
+            continue
+
+    raise ValueError(f"Cannot parse AI response as JSON array. First 200 chars: {content[:200]}")

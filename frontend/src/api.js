@@ -86,6 +86,46 @@ export const api = {
 
   deleteQuestion: (id) => request(`/questions/${id}`, { method: 'DELETE' }),
 
+  // Refine
+  refineQuestion: (data) =>
+    request('/generate/refine', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Knowledge Base
+  getKBSyllabus: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/kb/syllabus?${q}`)
+  },
+  createKBSyllabus: (data) =>
+    request('/kb/syllabus', { method: 'POST', body: JSON.stringify(data) }),
+  updateKBSyllabus: (id, data) =>
+    request(`/kb/syllabus/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteKBSyllabus: (id) =>
+    request(`/kb/syllabus/${id}`, { method: 'DELETE' }),
+
+  getKBRegulations: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/kb/regulations?${q}`)
+  },
+  createKBRegulation: (data) =>
+    request('/kb/regulations', { method: 'POST', body: JSON.stringify(data) }),
+  updateKBRegulation: (id, data) =>
+    request(`/kb/regulations/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteKBRegulation: (id) =>
+    request(`/kb/regulations/${id}`, { method: 'DELETE' }),
+
+  getKBSamples: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/kb/samples?${q}`)
+  },
+  createKBSample: (data) =>
+    request('/kb/samples', { method: 'POST', body: JSON.stringify(data) }),
+  updateKBSample: (id, data) =>
+    request(`/kb/samples/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteKBSample: (id) =>
+    request(`/kb/samples/${id}`, { method: 'DELETE' }),
+  importKBSampleFromBank: (data) =>
+    request('/kb/samples/import-from-bank', { method: 'POST', body: JSON.stringify(data) }),
+
   // Export
   exportWord: (questionIds) =>
     request('/export/word', {

@@ -4,6 +4,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Generate from './pages/Generate'
+import KnowledgeBase from './pages/KnowledgeBase'
 import QuestionBank from './pages/QuestionBank'
 import Regulations from './pages/Regulations'
 import Settings from './pages/Settings'
@@ -26,6 +27,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/generate" element={<Generate />} />
+        <Route path="/kb" element={<KnowledgeBase />} />
         <Route path="/bank" element={<QuestionBank />} />
         <Route path="/regulations" element={<Regulations />} />
         <Route path="/settings" element={<Settings />} />

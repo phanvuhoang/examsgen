@@ -151,6 +151,43 @@ def format_question_as_text(content: dict) -> str:
     return "\n".join(parts)
 
 
+def extract_text_from_file(file_path: str) -> str:
+    """Extract text from a file (wrapper for use by KB parse)."""
+    return extract_text(file_path)
+
+
+def build_kb_context(kb_syllabus_ids=None, kb_regulation_ids=None, kb_sample_ids=None) -> str:
+    """Build focused context from Knowledge Base selections."""
+    parts = []
+    with get_db() as conn:
+        cur = conn.cursor()
+
+        if kb_syllabus_ids:
+            cur.execute("SELECT section_code, section_title, content FROM kb_syllabus WHERE id = ANY(%s)", (kb_syllabus_ids,))
+            rows = cur.fetchall()
+            items_text = "\n".join(f"- [{r[0] or ''}] {r[1] or ''}: {r[2]}" for r in rows)
+            parts.append(f"SYLLABUS ITEMS TO TEST (question MUST cover these specifically):\n{items_text}")
+
+        if kb_regulation_ids:
+            cur.execute("SELECT regulation_ref, content FROM kb_regulation WHERE id = ANY(%s)", (kb_regulation_ids,))
+            rows = cur.fetchall()
+            items_text = "\n".join(f"- [{r[0] or ''}]: {r[1]}" for r in rows)
+            parts.append(f"REGULATION PARAGRAPHS TO USE (cite these articles specifically in the question):\n{items_text}")
+
+        if kb_sample_ids:
+            cur.execute("SELECT title, content, exam_tricks FROM kb_sample WHERE id = ANY(%s)", (kb_sample_ids,))
+            rows = cur.fetchall()
+            style_parts = []
+            for r in rows:
+                style_parts.append(f"=== STYLE REFERENCE: {r[0] or 'Sample'} ===")
+                if r[2]:
+                    style_parts.append(f"Key exam tricks in this sample: {r[2]}")
+                style_parts.append(r[1])
+            parts.append("STYLE REFERENCES — replicate structure, difficulty and exam tricks:\n" + "\n".join(style_parts))
+
+    return "\n\n".join(parts)
+
+
 def get_reference_content(reference_question_id: int = None, custom_instructions: str = None) -> str:
     """Build the custom instructions block to inject into prompt."""
     parts = []

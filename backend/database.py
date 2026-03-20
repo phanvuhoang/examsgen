@@ -62,6 +62,44 @@ def init_db():
                 user_id INTEGER DEFAULT 1
             );
 
+            CREATE TABLE IF NOT EXISTS kb_syllabus (
+                id SERIAL PRIMARY KEY,
+                sac_thue VARCHAR(20) NOT NULL,
+                section_code VARCHAR(50),
+                section_title VARCHAR(500),
+                content TEXT NOT NULL,
+                tags VARCHAR(500),
+                source_file VARCHAR(200),
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS kb_regulation (
+                id SERIAL PRIMARY KEY,
+                sac_thue VARCHAR(20) NOT NULL,
+                regulation_ref VARCHAR(200),
+                content TEXT NOT NULL,
+                tags VARCHAR(500),
+                syllabus_ids INTEGER[] DEFAULT '{}',
+                source_file VARCHAR(200),
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS kb_sample (
+                id SERIAL PRIMARY KEY,
+                question_type VARCHAR(20) NOT NULL,
+                sac_thue VARCHAR(20) NOT NULL,
+                title VARCHAR(300),
+                content TEXT NOT NULL,
+                exam_tricks TEXT,
+                syllabus_ids INTEGER[] DEFAULT '{}',
+                regulation_ids INTEGER[] DEFAULT '{}',
+                source VARCHAR(100) DEFAULT 'manual',
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+
             CREATE TABLE IF NOT EXISTS generation_log (
                 id SERIAL PRIMARY KEY,
                 question_id INTEGER REFERENCES questions(id),

@@ -10,6 +10,8 @@ REQUIREMENTS:
 - Distractors = specific, plausible student mistakes
 - Keep calculation and explanation CONCISE (max 1-2 sentences each)
 
+{kb_context}
+
 TAX RATES:
 {tax_rates}
 
@@ -59,6 +61,8 @@ STRUCTURE:
 - Include full marking scheme at the end
 
 {industry_instruction}
+
+{kb_context}
 
 TAX RATES:
 {tax_rates}
@@ -111,6 +115,8 @@ STRUCTURE:
 - Mix of CALCULATION and WRITTEN EXPLANATION sub-questions
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include detailed marking scheme showing each individual mark
+
+{kb_context}
 
 TAX RATES:
 {tax_rates}
