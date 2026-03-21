@@ -1,451 +1,648 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api'
-import ParseReviewPanel from '../components/ParseReviewPanel'
+import RichTextEditor from '../components/RichTextEditor'
 
-const SAC_THUE_OPTIONS = ['CIT', 'VAT', 'PIT', 'FCT', 'TP', 'ADMIN']
-const TABS = ['Syllabus', 'Regulations', 'Sample Questions']
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-export default function KnowledgeBase() {
-  const [tab, setTab] = useState(0)
-  const [sacThue, setSacThue] = useState('')
-  const [search, setSearch] = useState('')
+function useCurrentSession() {
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem('currentSessionId') || '')
+  useEffect(() => {
+    const handler = () => setSessionId(localStorage.getItem('currentSessionId') || '')
+    window.addEventListener('storage', handler)
+    return () => window.removeEventListener('storage', handler)
+  }, [])
+  return sessionId
+}
+
+function Toast({ message, onClose }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 3000)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <div className="fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm z-50">
+      {message}
+    </div>
+  )
+}
+
+// ── SYLLABUS TAB ───────────────────────────────────────────────────────────────
+
+function SyllabusTab({ sessionId, taxTypes }) {
+  const [taxType, setTaxType] = useState('')
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
-  const [showForm, setShowForm] = useState(false)
-  const [editItem, setEditItem] = useState(null)
-  const [form, setForm] = useState({})
-  const [saving, setSaving] = useState(false)
-  const [showImport, setShowImport] = useState(false)
-  const [bankQuestions, setBankQuestions] = useState([])
-  const [importForm, setImportForm] = useState({ question_id: '', title: '', exam_tricks: '' })
-  const [showParse, setShowParse] = useState(false)
-  const [sessions, setSessions] = useState([])
-  const [currentSession, setCurrentSession] = useState(null)
-  const [files, setFiles] = useState([])
+  const [editId, setEditId] = useState(null)
+  const [editRow, setEditRow] = useState({})
+  const [showUpload, setShowUpload] = useState(false)
+  const [uploadFile, setUploadFile] = useState(null)
+  const [preview, setPreview] = useState(null)
   const [uploading, setUploading] = useState(false)
-
-  // Load sessions and resolve current
-  useEffect(() => {
-    api.getSessions().then((data) => {
-      setSessions(data)
-      const storedId = localStorage.getItem('currentSessionId')
-      const match = data.find((s) => String(s.id) === storedId) || data.find((s) => s.is_default)
-      if (match) setCurrentSession(match)
-    }).catch(() => {})
-  }, [])
-
-  const sessionId = currentSession?.id
-  const TAB_DOC_TYPE = ['syllabus', 'regulation', 'sample_questions']
-
-  const fetchFiles = async () => {
-    if (!sessionId) return
-    try {
-      setFiles(await api.getSessionFiles(sessionId, TAB_DOC_TYPE[tab]))
-    } catch { setFiles([]) }
-  }
-
-  const handleUpload = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file || !sessionId) return
-    setUploading(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('doc_type', TAB_DOC_TYPE[tab])
-      formData.append('sac_thue', sacThue || 'CIT')
-      await api.uploadSessionDoc(sessionId, formData)
-      fetchFiles()
-    } catch (err) { alert('Upload failed: ' + err.message) }
-    finally { setUploading(false); e.target.value = '' }
-  }
-
-  const handleDeleteFile = async (fileId) => {
-    if (!confirm('Delete this file?')) return
-    await api.deleteSessionFile(sessionId, fileId)
-    fetchFiles()
-  }
+  const [toast, setToast] = useState('')
 
   const fetchItems = async () => {
+    if (!sessionId) return
     setLoading(true)
     try {
-      const params = {}
-      if (sessionId) params.session_id = sessionId
-      if (sacThue) params.sac_thue = sacThue
-      if (search) params.search = search
-      if (tab === 0) {
-        setItems(await api.getKBSyllabus(params))
-      } else if (tab === 1) {
-        setItems(await api.getKBRegulations(params))
-      } else {
-        setItems(await api.getKBSamples(params))
-      }
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
+      const params = { session_id: sessionId }
+      if (taxType) params.tax_type = taxType
+      const data = await api.getKBSyllabus(params)
+      setItems(data.filter((d) => d.syllabus_code))
+    } catch { setItems([]) }
+    finally { setLoading(false) }
   }
 
-  useEffect(() => { if (sessionId) { fetchItems(); fetchFiles() } }, [tab, sacThue, search, sessionId])
+  useEffect(() => { fetchItems() }, [sessionId, taxType])
 
-  const resetForm = () => {
-    if (tab === 0) setForm({ sac_thue: 'CIT', section_code: '', section_title: '', content: '', tags: '', session_id: sessionId })
-    else if (tab === 1) setForm({ sac_thue: 'CIT', regulation_ref: '', content: '', tags: '', session_id: sessionId })
-    else setForm({ question_type: 'MCQ', sac_thue: 'CIT', title: '', content: '', exam_tricks: '', session_id: sessionId })
-  }
-
-  const handleAdd = () => {
-    setEditItem(null)
-    resetForm()
-    setShowForm(true)
-  }
-
-  const handleEdit = (item) => {
-    setEditItem(item)
-    if (tab === 0) setForm({ sac_thue: item.sac_thue, section_code: item.section_code || '', section_title: item.section_title || '', content: item.content, tags: item.tags || '', session_id: sessionId })
-    else if (tab === 1) setForm({ sac_thue: item.sac_thue, regulation_ref: item.regulation_ref || '', content: item.content, tags: item.tags || '', session_id: sessionId })
-    else setForm({ question_type: item.question_type, sac_thue: item.sac_thue, title: item.title || '', content: item.content, exam_tricks: item.exam_tricks || '', session_id: sessionId })
-    setShowForm(true)
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
+  const handleUploadPreview = async () => {
+    if (!uploadFile || !taxType || !sessionId) { alert('Select tax type and file first'); return }
+    setUploading(true)
     try {
-      if (tab === 0) {
-        if (editItem) await api.updateKBSyllabus(editItem.id, form)
-        else await api.createKBSyllabus(form)
-      } else if (tab === 1) {
-        if (editItem) await api.updateKBRegulation(editItem.id, form)
-        else await api.createKBRegulation(form)
-      } else {
-        if (editItem) await api.updateKBSample(editItem.id, form)
-        else await api.createKBSample(form)
-      }
-      setShowForm(false)
+      const fd = new FormData()
+      fd.append('session_id', sessionId)
+      fd.append('tax_type', taxType)
+      fd.append('file', uploadFile)
+      const data = await api.uploadKBSyllabus(fd)
+      setPreview(data)
+    } catch (err) { alert('Upload failed: ' + err.message) }
+    finally { setUploading(false) }
+  }
+
+  const handleConfirmImport = async () => {
+    if (!preview) return
+    setUploading(true)
+    try {
+      await api.bulkInsertKBSyllabus({ session_id: parseInt(sessionId), tax_type: taxType, rows: preview.rows })
+      setShowUpload(false)
+      setPreview(null)
+      setUploadFile(null)
+      setToast(`${preview.total} items imported`)
       fetchItems()
-    } catch (err) {
-      alert('Save failed: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
+    } catch (err) { alert('Import failed: ' + err.message) }
+    finally { setUploading(false) }
+  }
+
+  const handleSaveEdit = async () => {
+    try {
+      await api.updateKBSyllabus(editId, {
+        sac_thue: taxType || editRow.sac_thue || editRow.tax_type,
+        section_code: editRow.syllabus_code,
+        section_title: editRow.topic,
+        content: editRow.detailed_syllabus,
+        tax_type: taxType || editRow.tax_type,
+        syllabus_code: editRow.syllabus_code,
+        topic: editRow.topic,
+        detailed_syllabus: editRow.detailed_syllabus,
+        session_id: parseInt(sessionId),
+      })
+      setEditId(null)
+      fetchItems()
+    } catch (err) { alert('Save failed: ' + err.message) }
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('Delete this item?')) return
+    if (!confirm('Delete this syllabus item?')) return
+    try { await api.deleteKBSyllabus(id); fetchItems() } catch { }
+  }
+
+  const handleAddManual = async () => {
     try {
-      if (tab === 0) await api.deleteKBSyllabus(id)
-      else if (tab === 1) await api.deleteKBRegulation(id)
-      else await api.deleteKBSample(id)
+      await api.createKBSyllabus({
+        sac_thue: taxType || 'CIT', section_code: 'NEW', section_title: '', content: '',
+        tax_type: taxType || 'CIT', syllabus_code: 'NEW', topic: '', detailed_syllabus: '',
+        session_id: parseInt(sessionId),
+      })
       fetchItems()
-    } catch (err) {
-      alert('Delete failed: ' + err.message)
-    }
-  }
-
-  const handleImportFromBank = async () => {
-    if (!importForm.question_id) return
-    try {
-      await api.importKBSampleFromBank(importForm)
-      setShowImport(false)
-      setImportForm({ question_id: '', title: '', exam_tricks: '' })
-      fetchItems()
-    } catch (err) {
-      alert('Import failed: ' + err.message)
-    }
-  }
-
-  const loadBankQuestions = async () => {
-    try {
-      const qs = await api.getQuestions({ limit: 50 })
-      setBankQuestions(Array.isArray(qs) ? qs : qs.questions || [])
-    } catch {
-      setBankQuestions([])
-    }
-    setShowImport(true)
-  }
-
-  const switchSession = (id) => {
-    const match = sessions.find((s) => String(s.id) === id)
-    if (match) {
-      setCurrentSession(match)
-      localStorage.setItem('currentSessionId', id)
-    }
+    } catch (err) { alert('Failed: ' + err.message) }
   }
 
   return (
-    <div className="max-w-6xl">
-      {/* Session header */}
-      <div className="flex items-center gap-3 mb-6">
-        <h2 className="text-2xl font-bold">Knowledge Base</h2>
-        <span className="text-gray-400">—</span>
-        <select
-          value={sessionId || ''}
-          onChange={(e) => switchSession(e.target.value)}
-          className="text-sm border rounded-lg px-3 py-1.5 font-medium text-brand-600"
-        >
-          {sessions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 mb-4 border-b">
-        {TABS.map((t, i) => (
-          <button
-            key={t}
-            onClick={() => { setTab(i); setShowForm(false); setShowParse(false) }}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === i ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-3 mb-4">
-        <select
-          value={sacThue}
-          onChange={(e) => setSacThue(e.target.value)}
-          className="border rounded-lg px-3 py-2 text-sm"
-        >
+    <div>
+      {toast && <Toast message={toast} onClose={() => setToast('')} />}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <select value={taxType} onChange={(e) => setTaxType(e.target.value)}
+          className="border rounded px-3 py-1.5 text-sm">
           <option value="">All Tax Types</option>
-          {SAC_THUE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+          {taxTypes.map((t) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}
         </select>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search..."
-          className="border rounded-lg px-3 py-2 text-sm flex-1"
-        />
-        <button onClick={handleAdd} className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600">
-          + Add
+        <button onClick={() => setShowUpload(true)}
+          className="px-3 py-1.5 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600">
+          Upload CSV/Excel
         </button>
-        {(tab === 0 || tab === 1) && sessionId && (
-          <button onClick={() => setShowParse(!showParse)}
-            className="px-4 py-2 bg-purple-500 text-white text-sm rounded-lg hover:bg-purple-600">
-            Parse & Match File
-          </button>
-        )}
-        {tab === 2 && (
-          <button onClick={loadBankQuestions} className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600">
-            Import from Bank
-          </button>
-        )}
+        <button onClick={handleAddManual}
+          className="px-3 py-1.5 border text-sm rounded-lg hover:bg-gray-50">
+          + Add manually
+        </button>
+        <span className="text-xs text-gray-500 ml-auto">{items.length} items</span>
       </div>
 
-      {/* Uploaded Files */}
-      {sessionId && (
-        <div className="bg-white border rounded-xl p-4 mb-4">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-sm font-semibold text-gray-600">Uploaded Files</h4>
-            <label className={`px-3 py-1.5 bg-brand-500 text-white text-xs rounded-lg hover:bg-brand-600 cursor-pointer ${uploading ? 'opacity-50' : ''}`}>
-              {uploading ? 'Uploading...' : '+ Upload File'}
-              <input type="file" accept=".doc,.docx" onChange={handleUpload} className="hidden" disabled={uploading} />
-            </label>
-          </div>
-          {files.length === 0 ? (
-            <p className="text-xs text-gray-400">No files uploaded yet.</p>
-          ) : (
-            <div className="space-y-1">
-              {files.map((f) => (
-                <div key={f.id} className="flex items-center justify-between text-sm py-1.5 px-2 rounded hover:bg-gray-50">
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-400">&#128196;</span>
-                    <span className="font-medium text-gray-700">{f.file_name}</span>
-                    <span className="bg-gray-100 text-xs px-1.5 py-0.5 rounded">{f.sac_thue}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => { setShowParse(true) }}
-                      className="text-xs text-purple-600 hover:underline">Parse</button>
-                    <button onClick={() => handleDeleteFile(f.id)}
-                      className="text-xs text-red-500 hover:underline">Delete</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Parse & Match Panel */}
-      {showParse && sessionId && (
-        <ParseReviewPanel sessionId={sessionId} onDone={() => { setShowParse(false); fetchItems() }} />
-      )}
-
-      {/* Add/Edit Form */}
-      {showForm && (
-        <div className="bg-white border rounded-xl p-5 mb-4">
-          <h3 className="font-semibold mb-3">{editItem ? 'Edit' : 'Add'} {TABS[tab].replace(' Questions', '')}</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium mb-1">Tax Type</label>
-              <select value={form.sac_thue || 'CIT'} onChange={(e) => setForm({ ...form, sac_thue: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm">
-                {SAC_THUE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            {tab === 0 && (
-              <>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Section Code</label>
-                  <input value={form.section_code || ''} onChange={(e) => setForm({ ...form, section_code: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. Article 9.2" />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-xs font-medium mb-1">Section Title</label>
-                  <input value={form.section_title || ''} onChange={(e) => setForm({ ...form, section_title: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm" />
-                </div>
-              </>
-            )}
-            {tab === 1 && (
+      {/* Upload Modal */}
+      {showUpload && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-5 w-full max-w-lg mx-4">
+            <h4 className="font-semibold mb-3">Upload Syllabus CSV/Excel</h4>
+            <p className="text-xs text-gray-500 mb-3">Required columns: Code, Topics, Detailed Syllabus</p>
+            <div className="space-y-3">
               <div>
-                <label className="block text-xs font-medium mb-1">Regulation Ref</label>
-                <input value={form.regulation_ref || ''} onChange={(e) => setForm({ ...form, regulation_ref: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. Article 9, Decree 218" />
+                <label className="text-xs font-medium block mb-1">Tax Type</label>
+                <select value={taxType} onChange={(e) => setTaxType(e.target.value)}
+                  className="w-full border rounded px-3 py-1.5 text-sm">
+                  <option value="">Select tax type</option>
+                  {taxTypes.map((t) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}
+                </select>
               </div>
-            )}
-            {tab === 2 && (
-              <>
+              <div>
+                <label className="text-xs font-medium block mb-1">File (CSV or .xlsx)</label>
+                <input type="file" accept=".csv,.xlsx,.xls"
+                  onChange={(e) => { setUploadFile(e.target.files[0]); setPreview(null) }}
+                  className="w-full text-sm" />
+              </div>
+              {!preview && (
+                <button onClick={handleUploadPreview} disabled={uploading}
+                  className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg disabled:opacity-50">
+                  {uploading ? 'Parsing...' : 'Preview'}
+                </button>
+              )}
+              {preview && (
                 <div>
-                  <label className="block text-xs font-medium mb-1">Question Type</label>
-                  <select value={form.question_type || 'MCQ'} onChange={(e) => setForm({ ...form, question_type: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm">
-                    <option value="MCQ">MCQ</option>
-                    <option value="SCENARIO_10">Scenario</option>
-                    <option value="LONGFORM_15">Long-form</option>
-                  </select>
+                  <p className="text-xs font-medium mb-2">Preview ({preview.total} rows total):</p>
+                  <div className="overflow-x-auto border rounded">
+                    <table className="text-xs w-full">
+                      <thead className="bg-gray-50">
+                        <tr>{['Code', 'Topics', 'Detailed Syllabus'].map((h) => <th key={h} className="px-2 py-1 text-left">{h}</th>)}</tr>
+                      </thead>
+                      <tbody>{preview.preview.map((r, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="px-2 py-1 font-mono">{r.code}</td>
+                          <td className="px-2 py-1">{r.topics}</td>
+                          <td className="px-2 py-1 max-w-xs truncate">{r.detailed_syllabus}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                  <button onClick={handleConfirmImport} disabled={uploading}
+                    className="mt-3 px-4 py-2 bg-green-600 text-white text-sm rounded-lg disabled:opacity-50">
+                    {uploading ? 'Importing...' : `Confirm Import (${preview.total} items)`}
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Title</label>
-                  <input value={form.title || ''} onChange={(e) => setForm({ ...form, title: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm" />
-                </div>
-              </>
-            )}
-            <div className="col-span-2">
-              <label className="block text-xs font-medium mb-1">Content</label>
-              <textarea value={form.content || ''} onChange={(e) => setForm({ ...form, content: e.target.value })}
-                rows={5} className="w-full border rounded-lg px-3 py-2 text-sm resize-y" />
+              )}
             </div>
-            {(tab === 0 || tab === 1) && (
-              <div className="col-span-2">
-                <label className="block text-xs font-medium mb-1">Tags (comma-separated)</label>
-                <input value={form.tags || ''} onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. deductible, expenses, CIT" />
-              </div>
-            )}
-            {tab === 2 && (
-              <div className="col-span-2">
-                <label className="block text-xs font-medium mb-1">Exam Tricks</label>
-                <input value={form.exam_tricks || ''} onChange={(e) => setForm({ ...form, exam_tricks: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Key tricks tested in this question" />
-              </div>
-            )}
-          </div>
-          <div className="flex gap-2 mt-4">
-            <button onClick={handleSave} disabled={saving}
-              className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 disabled:opacity-50">
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-            <button onClick={() => setShowForm(false)} className="px-4 py-2 border text-sm rounded-lg hover:bg-gray-50">
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Import from Bank modal */}
-      {showImport && (
-        <div className="bg-white border rounded-xl p-5 mb-4">
-          <h3 className="font-semibold mb-3">Import from Question Bank</h3>
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium mb-1">Select Question</label>
-              <select value={importForm.question_id} onChange={(e) => setImportForm({ ...importForm, question_id: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm">
-                <option value="">-- Select --</option>
-                {bankQuestions.map((q) => (
-                  <option key={q.id} value={q.id}>#{q.id} {q.question_type} - {q.sac_thue} ({new Date(q.created_at).toLocaleDateString()})</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1">Title</label>
-              <input value={importForm.title} onChange={(e) => setImportForm({ ...importForm, title: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Short descriptive title" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1">Exam Tricks</label>
-              <input value={importForm.exam_tricks} onChange={(e) => setImportForm({ ...importForm, exam_tricks: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Key tricks tested" />
-            </div>
-            <div className="flex gap-2">
-              <button onClick={handleImportFromBank} className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600">
-                Import
-              </button>
-              <button onClick={() => setShowImport(false)} className="px-4 py-2 border text-sm rounded-lg hover:bg-gray-50">
-                Cancel
-              </button>
-            </div>
+            <button onClick={() => { setShowUpload(false); setPreview(null); setUploadFile(null) }}
+              className="mt-3 text-sm text-gray-500 hover:underline">Cancel</button>
           </div>
         </div>
       )}
 
       {/* Table */}
-      {loading ? (
-        <div className="text-center py-8 text-gray-400">Loading...</div>
-      ) : items.length === 0 ? (
-        <div className="text-center py-8 text-gray-400">No items yet. Click "+ Add" to create one, or use "Parse & Match File" to import from data files.</div>
-      ) : (
-        <div className="bg-white rounded-xl border overflow-hidden">
+      {loading ? <div className="text-center py-8 text-gray-400">Loading...</div> : (
+        <div className="overflow-x-auto border rounded-lg">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 text-xs">
               <tr>
-                <th className="text-left px-4 py-2 font-medium text-gray-500">ID</th>
-                <th className="text-left px-4 py-2 font-medium text-gray-500">Tax</th>
-                {tab === 0 && <th className="text-left px-4 py-2 font-medium text-gray-500">Section</th>}
-                {tab === 0 && <th className="text-left px-4 py-2 font-medium text-gray-500">Title</th>}
-                {tab === 1 && <th className="text-left px-4 py-2 font-medium text-gray-500">Ref</th>}
-                {tab === 2 && <th className="text-left px-4 py-2 font-medium text-gray-500">Type</th>}
-                {tab === 2 && <th className="text-left px-4 py-2 font-medium text-gray-500">Title</th>}
-                <th className="text-left px-4 py-2 font-medium text-gray-500">
-                  {tab === 2 ? 'Tricks' : 'Tags'}
-                </th>
-                <th className="text-left px-4 py-2 font-medium text-gray-500">Content</th>
-                <th className="text-right px-4 py-2 font-medium text-gray-500">Actions</th>
+                <th className="px-3 py-2 text-left w-20">Code</th>
+                <th className="px-3 py-2 text-left w-40">Topics</th>
+                <th className="px-3 py-2 text-left">Detailed Syllabus</th>
+                <th className="px-3 py-2 text-left w-24">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y">
               {items.map((item) => (
-                <tr key={item.id} className="border-b hover:bg-gray-50">
-                  <td className="px-4 py-2 text-gray-400">{item.id}</td>
-                  <td className="px-4 py-2">
-                    <span className="bg-gray-100 text-xs px-2 py-0.5 rounded">{item.sac_thue}</span>
-                  </td>
-                  {tab === 0 && <td className="px-4 py-2 text-xs">{item.section_code || '-'}</td>}
-                  {tab === 0 && <td className="px-4 py-2 text-xs">{item.section_title || '-'}</td>}
-                  {tab === 1 && <td className="px-4 py-2 text-xs">{item.regulation_ref || '-'}</td>}
-                  {tab === 2 && <td className="px-4 py-2"><span className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded">{item.question_type}</span></td>}
-                  {tab === 2 && <td className="px-4 py-2 text-xs">{item.title || '-'}</td>}
-                  <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {(tab === 2 ? (item.exam_tricks || '') : (item.tags || '')).split(',').filter(Boolean).map((t, i) => (
-                        <span key={i} className="bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded">{t.trim()}</span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-4 py-2 text-xs text-gray-500 max-w-xs truncate">{item.content?.slice(0, 80)}...</td>
-                  <td className="px-4 py-2 text-right">
-                    <button onClick={() => handleEdit(item)} className="text-brand-600 hover:underline text-xs mr-2">Edit</button>
-                    <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:underline text-xs">Delete</button>
-                  </td>
-                </tr>
+                editId === item.id ? (
+                  <tr key={item.id} className="bg-blue-50">
+                    <td className="px-2 py-1"><input value={editRow.syllabus_code || ''} onChange={(e) => setEditRow({ ...editRow, syllabus_code: e.target.value })} className="w-full border rounded px-1 py-0.5 text-xs" /></td>
+                    <td className="px-2 py-1"><input value={editRow.topic || ''} onChange={(e) => setEditRow({ ...editRow, topic: e.target.value })} className="w-full border rounded px-1 py-0.5 text-xs" /></td>
+                    <td className="px-2 py-1"><textarea value={editRow.detailed_syllabus || ''} onChange={(e) => setEditRow({ ...editRow, detailed_syllabus: e.target.value })} rows={2} className="w-full border rounded px-1 py-0.5 text-xs" /></td>
+                    <td className="px-2 py-1">
+                      <button onClick={handleSaveEdit} className="text-xs text-green-600 mr-1">Save</button>
+                      <button onClick={() => setEditId(null)} className="text-xs text-gray-500">Cancel</button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={item.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-mono text-xs">{item.syllabus_code || item.section_code}</td>
+                    <td className="px-3 py-2 text-xs text-gray-600">{item.topic || item.section_title}</td>
+                    <td className="px-3 py-2 text-xs">{(item.detailed_syllabus || item.content || '').substring(0, 120)}{(item.detailed_syllabus || item.content || '').length > 120 ? '...' : ''}</td>
+                    <td className="px-3 py-2">
+                      <button onClick={() => { setEditId(item.id); setEditRow({ syllabus_code: item.syllabus_code || item.section_code, topic: item.topic || item.section_title, detailed_syllabus: item.detailed_syllabus || item.content, ...item }) }} className="text-xs text-brand-600 mr-2">Edit</button>
+                      <button onClick={() => handleDelete(item.id)} className="text-xs text-red-500">✕</button>
+                    </td>
+                  </tr>
+                )
               ))}
+              {items.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-gray-400 text-sm">No syllabus items. Upload a CSV/Excel file to get started.</td></tr>}
             </tbody>
           </table>
         </div>
+      )}
+    </div>
+  )
+}
+
+// ── REGULATIONS TAB ─────────────────────────────────────────────────────────────
+
+function RegulationsTab({ sessionId, taxTypes }) {
+  const [taxType, setTaxType] = useState('')
+  const [files, setFiles] = useState([])
+  const [parsedRows, setParsedRows] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [parsing, setParsing] = useState(null)
+  const [editItem, setEditItem] = useState(null)
+  const [search, setSearch] = useState('')
+  const [toast, setToast] = useState('')
+
+  const fetchFiles = async () => {
+    if (!sessionId) return
+    try {
+      const data = await api.getSessionFiles(sessionId, 'regulation')
+      setFiles(data)
+    } catch { setFiles([]) }
+  }
+
+  const fetchParsed = async () => {
+    if (!sessionId) return
+    setLoading(true)
+    try {
+      const params = { session_id: sessionId }
+      if (taxType) params.tax_type = taxType
+      const data = await api.getParsedRegulations(params)
+      setParsedRows(data)
+    } catch { setParsedRows([]) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { fetchFiles(); fetchParsed() }, [sessionId, taxType])
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files[0]
+    if (!file || !taxType || !sessionId) { alert('Select tax type first'); return }
+    const fd = new FormData()
+    fd.append('doc_type', 'regulation')
+    fd.append('sac_thue', taxType)
+    fd.append('file', file)
+    try {
+      await api.uploadSessionDoc(sessionId, fd)
+      setToast('File uploaded')
+      fetchFiles()
+    } catch (err) { alert('Upload failed: ' + err.message) }
+    e.target.value = ''
+  }
+
+  const handleParse = async (file) => {
+    const docRef = prompt('Enter document reference (e.g. "Decree 320/2025/ND-CP"):', file.file_name.replace(/\.(docx?|pdf)$/i, ''))
+    if (docRef === null) return
+    setParsing(file.id)
+    try {
+      const res = await api.parseRegulationDoc({
+        session_id: parseInt(sessionId),
+        tax_type: taxType || file.sac_thue,
+        file_path: file.file_path,
+        doc_ref: docRef,
+      })
+      setToast(`Parsed ${res.parsed} paragraphs`)
+      fetchParsed()
+    } catch (err) { alert('Parse failed: ' + err.message) }
+    finally { setParsing(null) }
+  }
+
+  const handleDeleteFile = async (fileId) => {
+    if (!confirm('Delete this file?')) return
+    try { await api.deleteSessionFile(sessionId, fileId); fetchFiles() } catch { }
+  }
+
+  const handleSaveEdit = async () => {
+    try {
+      await api.updateParsedRegulation(editItem.id, {
+        paragraph_text: editItem.paragraph_text,
+        syllabus_codes: editItem.syllabus_codes || [],
+        tags: editItem.tags,
+      })
+      setEditItem(null)
+      fetchParsed()
+    } catch (err) { alert('Save failed: ' + err.message) }
+  }
+
+  const handleDeleteParsed = async (id) => {
+    if (!confirm('Delete this paragraph?')) return
+    try { await api.deleteParsedRegulation(id); fetchParsed() } catch { }
+  }
+
+  const filteredRows = search
+    ? parsedRows.filter((r) => r.reg_code?.includes(search) || r.paragraph_text?.toLowerCase().includes(search.toLowerCase()))
+    : parsedRows
+
+  return (
+    <div>
+      {toast && <Toast message={toast} onClose={() => setToast('')} />}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <select value={taxType} onChange={(e) => setTaxType(e.target.value)}
+          className="border rounded px-3 py-1.5 text-sm">
+          <option value="">All Tax Types</option>
+          {taxTypes.map((t) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}
+        </select>
+        <label className="px-3 py-1.5 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 cursor-pointer">
+          + Upload File
+          <input type="file" accept=".doc,.docx,.pdf,.txt" onChange={handleUploadFile} className="hidden" />
+        </label>
+      </div>
+
+      {/* Files */}
+      {files.length > 0 && (
+        <div className="mb-4 border rounded-lg p-3 space-y-2">
+          <p className="text-xs font-medium text-gray-600 mb-1">Uploaded Files:</p>
+          {files.map((f) => (
+            <div key={f.id} className="flex items-center gap-3 text-sm">
+              <span className="text-lg">📄</span>
+              <span className="flex-1 text-xs">{f.file_name}</span>
+              <span className="text-xs text-gray-400">{f.sac_thue}</span>
+              <button onClick={() => handleParse(f)} disabled={parsing === f.id}
+                className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50">
+                {parsing === f.id ? 'Parsing...' : 'Parse'}
+              </button>
+              <button onClick={() => handleDeleteFile(f.id)} className="text-xs text-red-500">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Parsed paragraphs */}
+      <div className="flex items-center gap-3 mb-3">
+        <span className="text-sm font-medium">Parsed Paragraphs ({parsedRows.length})</span>
+        <input value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search..." className="border rounded px-3 py-1 text-sm flex-1 max-w-xs" />
+      </div>
+
+      {loading ? <div className="text-center py-6 text-gray-400">Loading...</div> : (
+        <div className="overflow-x-auto border rounded-lg">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs">
+              <tr>
+                <th className="px-3 py-2 text-left w-36">RegCode</th>
+                <th className="px-3 py-2 text-left w-24">Article</th>
+                <th className="px-3 py-2 text-left">Paragraph Text</th>
+                <th className="px-3 py-2 text-left w-28">Syllabus Codes</th>
+                <th className="px-3 py-2 text-left w-20">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {filteredRows.map((row) => (
+                <tr key={row.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono text-xs">{row.reg_code}</td>
+                  <td className="px-3 py-2 text-xs">{row.article_no}</td>
+                  <td className="px-3 py-2 text-xs">{row.paragraph_text?.substring(0, 150)}...</td>
+                  <td className="px-3 py-2 text-xs">{(row.syllabus_codes || []).join(', ')}</td>
+                  <td className="px-3 py-2">
+                    <button onClick={() => setEditItem({ ...row })} className="text-xs text-brand-600 mr-2">Edit</button>
+                    <button onClick={() => handleDeleteParsed(row.id)} className="text-xs text-red-500">✕</button>
+                  </td>
+                </tr>
+              ))}
+              {filteredRows.length === 0 && (
+                <tr><td colSpan={5} className="text-center py-6 text-gray-400 text-sm">No parsed paragraphs. Upload and parse a regulation file.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editItem && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-5 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+            <h4 className="font-semibold mb-1">Edit Paragraph: <span className="font-mono text-brand-600">{editItem.reg_code}</span></h4>
+            <div className="space-y-3 mt-3">
+              <div>
+                <label className="text-xs font-medium block mb-1">Paragraph Text</label>
+                <textarea value={editItem.paragraph_text || ''} rows={6}
+                  onChange={(e) => setEditItem({ ...editItem, paragraph_text: e.target.value })}
+                  className="w-full border rounded px-2 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1">Syllabus Codes (comma-separated)</label>
+                <input value={(editItem.syllabus_codes || []).join(', ')}
+                  onChange={(e) => setEditItem({ ...editItem, syllabus_codes: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
+                  className="w-full border rounded px-2 py-1.5 text-sm" placeholder="B2a, B2b, C1a" />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1">Tags</label>
+                <input value={editItem.tags || ''} onChange={(e) => setEditItem({ ...editItem, tags: e.target.value })}
+                  className="w-full border rounded px-2 py-1.5 text-sm" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={handleSaveEdit} className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg">Save</button>
+              <button onClick={() => setEditItem(null)} className="px-4 py-2 border text-sm rounded-lg">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── TAX RATES TAB ───────────────────────────────────────────────────────────────
+
+function TaxRatesTab({ sessionId, taxTypes }) {
+  const [taxType, setTaxType] = useState('')
+  const [rates, setRates] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [showModal, setShowModal] = useState(false)
+  const [editItem, setEditItem] = useState(null)
+  const [form, setForm] = useState({ table_name: '', tax_type: '', content: '' })
+  const [uploadFile, setUploadFile] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState('')
+
+  const fetchRates = async () => {
+    if (!sessionId) return
+    setLoading(true)
+    try {
+      const params = { session_id: sessionId }
+      if (taxType) params.tax_type = taxType
+      const data = await api.getTaxRates(params)
+      setRates(data)
+    } catch { setRates([]) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { fetchRates() }, [sessionId, taxType])
+
+  const openAdd = () => {
+    setEditItem(null)
+    setForm({ table_name: '', tax_type: taxType || '', content: '' })
+    setUploadFile(null)
+    setShowModal(true)
+  }
+
+  const openEdit = (item) => {
+    setEditItem(item)
+    setForm({ table_name: item.table_name, tax_type: item.tax_type, content: item.content })
+    setShowModal(true)
+  }
+
+  const handleSave = async () => {
+    if (!form.table_name || !form.tax_type) { alert('Table name and tax type required'); return }
+    setSaving(true)
+    try {
+      if (uploadFile) {
+        const fd = new FormData()
+        fd.append('session_id', sessionId)
+        fd.append('tax_type', form.tax_type)
+        fd.append('table_name', form.table_name)
+        fd.append('file', uploadFile)
+        await api.uploadTaxRates(fd)
+      } else if (editItem) {
+        await api.updateTaxRate(editItem.id, form)
+      } else {
+        await api.createTaxRate({ ...form, session_id: parseInt(sessionId) })
+      }
+      setShowModal(false)
+      setToast('Saved')
+      fetchRates()
+    } catch (err) { alert('Save failed: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Delete this rate table?')) return
+    try { await api.deleteTaxRate(id); fetchRates() } catch { }
+  }
+
+  return (
+    <div>
+      {toast && <Toast message={toast} onClose={() => setToast('')} />}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <select value={taxType} onChange={(e) => setTaxType(e.target.value)}
+          className="border rounded px-3 py-1.5 text-sm">
+          <option value="">All Tax Types</option>
+          {taxTypes.map((t) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}
+        </select>
+        <button onClick={openAdd}
+          className="px-3 py-1.5 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600">
+          + Add Rate Table
+        </button>
+      </div>
+
+      {loading ? <div className="text-center py-6 text-gray-400">Loading...</div> : (
+        <div className="space-y-4">
+          {rates.map((rate) => (
+            <div key={rate.id} className="border rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <span className="font-medium text-sm">{rate.table_name}</span>
+                  <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">{rate.tax_type}</span>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => openEdit(rate)} className="text-xs text-brand-600 hover:underline">Edit</button>
+                  <button onClick={() => handleDelete(rate.id)} className="text-xs text-red-500 hover:underline">✕</button>
+                </div>
+              </div>
+              <div className="text-xs text-gray-600 overflow-x-auto"
+                dangerouslySetInnerHTML={{ __html: rate.content.substring(0, 1000) }} />
+            </div>
+          ))}
+          {rates.length === 0 && (
+            <div className="text-center py-8 text-gray-400 text-sm border rounded-lg">
+              No tax rate tables. Add one to start.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Add/Edit Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-5 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+            <h4 className="font-semibold mb-3">{editItem ? 'Edit' : 'Add'} Rate Table</h4>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium block mb-1">Table Name</label>
+                <input value={form.table_name} onChange={(e) => setForm({ ...form, table_name: e.target.value })}
+                  placeholder="e.g. PIT on Employment Income (Progressive Rates)"
+                  className="w-full border rounded px-3 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1">Tax Type</label>
+                <select value={form.tax_type} onChange={(e) => setForm({ ...form, tax_type: e.target.value })}
+                  className="w-full border rounded px-3 py-1.5 text-sm">
+                  <option value="">Select</option>
+                  {taxTypes.map((t) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1">Upload CSV/Excel (optional)</label>
+                <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setUploadFile(e.target.files[0])}
+                  className="w-full text-sm" />
+              </div>
+              {!uploadFile && (
+                <div>
+                  <label className="text-xs font-medium block mb-1">Content</label>
+                  <div style={{ paddingBottom: 50 }}>
+                    <RichTextEditor value={form.content} onChange={(val) => setForm({ ...form, content: val })}
+                      placeholder="Paste or type rate table here..." height={200} />
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={handleSave} disabled={saving}
+                className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg disabled:opacity-50">
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 border text-sm rounded-lg">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main Page ───────────────────────────────────────────────────────────────────
+
+const TABS = ['Syllabus', 'Regulations', 'Tax Rates']
+
+export default function KnowledgeBase() {
+  const sessionId = useCurrentSession()
+  const [activeTab, setActiveTab] = useState('Syllabus')
+  const [taxTypes, setTaxTypes] = useState([])
+
+  useEffect(() => {
+    if (!sessionId) return
+    api.getSessionSettings(sessionId)
+      .then((d) => setTaxTypes(d.tax_types || []))
+      .catch(() => setTaxTypes([
+        { code: 'CIT', name: 'Corporate Income Tax' },
+        { code: 'PIT', name: 'Personal Income Tax' },
+        { code: 'VAT', name: 'Value Added Tax' },
+        { code: 'FCT', name: 'Foreign Contractor Tax' },
+      ]))
+  }, [sessionId])
+
+  return (
+    <div className="max-w-6xl">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold">Knowledge Base</h2>
+        {!sessionId && <p className="text-sm text-yellow-600">Select a session in the sidebar.</p>}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b mb-6">
+        {TABS.map((tab) => (
+          <button key={tab} onClick={() => setActiveTab(tab)}
+            className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tab ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}>
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {sessionId && (
+        <>
+          {activeTab === 'Syllabus' && <SyllabusTab sessionId={sessionId} taxTypes={taxTypes} />}
+          {activeTab === 'Regulations' && <RegulationsTab sessionId={sessionId} taxTypes={taxTypes} />}
+          {activeTab === 'Tax Rates' && <TaxRatesTab sessionId={sessionId} taxTypes={taxTypes} />}
+        </>
       )}
     </div>
   )

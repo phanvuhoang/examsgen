@@ -13,6 +13,7 @@ from backend.routes.questions import router as questions_router
 from backend.routes.export import router as export_router
 from backend.routes.kb import router as kb_router
 from backend.routes.sessions import router as sessions_router
+from backend.routes.sample_questions import router as sample_questions_router
 from backend.seed import seed_regulations
 
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,7 @@ app.include_router(questions_router)
 app.include_router(export_router)
 app.include_router(kb_router)
 app.include_router(sessions_router)
+app.include_router(sample_questions_router)
 
 
 @app.get("/api/health")

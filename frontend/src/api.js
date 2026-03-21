@@ -167,4 +167,84 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ question_ids: questionIds }),
     }),
+
+  // v2: Session settings
+  getSessionSettings: (id) => request(`/sessions/${id}/settings`),
+  patchSessionSettings: (id, data) =>
+    request(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // v2: KB Syllabus — upload + bulk-insert + search
+  uploadKBSyllabus: (formData) => {
+    const token = localStorage.getItem('token')
+    return fetch(`${API_BASE}/kb/syllabus/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    }).then((r) => { if (!r.ok) throw new Error('Upload failed'); return r.json() })
+  },
+  bulkInsertKBSyllabus: (data) =>
+    request('/kb/syllabus/bulk-insert', { method: 'POST', body: JSON.stringify(data) }),
+  searchKBSyllabus: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/kb/syllabus/search?${q}`)
+  },
+
+  // v2: Regulations parsed
+  parseRegulationDoc: (data) =>
+    request('/kb/regulations/parse-doc', { method: 'POST', body: JSON.stringify(data) }),
+  getParsedRegulations: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/kb/regulations/parsed?${q}`)
+  },
+  searchParsedRegulations: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/kb/regulations/search?${q}`)
+  },
+  updateParsedRegulation: (id, data) =>
+    request(`/kb/regulation-parsed/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteParsedRegulation: (id) =>
+    request(`/kb/regulation-parsed/${id}`, { method: 'DELETE' }),
+
+  // v2: Tax Rates
+  getTaxRates: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/kb/tax-rates?${q}`)
+  },
+  uploadTaxRates: (formData) => {
+    const token = localStorage.getItem('token')
+    return fetch(`${API_BASE}/kb/tax-rates/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    }).then((r) => { if (!r.ok) throw new Error('Upload failed'); return r.json() })
+  },
+  createTaxRate: (data) =>
+    request('/kb/tax-rates', { method: 'POST', body: JSON.stringify(data) }),
+  updateTaxRate: (id, data) =>
+    request(`/kb/tax-rates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteTaxRate: (id) =>
+    request(`/kb/tax-rates/${id}`, { method: 'DELETE' }),
+
+  // v2: Sample Questions
+  getSampleQuestions: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/sample-questions?${q}`)
+  },
+  searchSampleQuestions: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/sample-questions/search?${q}`)
+  },
+  getSampleQuestion: (id) => request(`/sample-questions/${id}`),
+  createSampleQuestion: (data) =>
+    request('/sample-questions', { method: 'POST', body: JSON.stringify(data) }),
+  updateSampleQuestion: (id, data) =>
+    request(`/sample-questions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSampleQuestion: (id) =>
+    request(`/sample-questions/${id}`, { method: 'DELETE' }),
+
+  // v2: Questions search
+  searchQuestions: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/questions/search?${q}`)
+  },
 }

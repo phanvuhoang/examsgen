@@ -21,6 +21,12 @@ class MCQGenerateRequest(BaseModel):
     kb_sample_ids: Optional[List[int]] = None
     session_id: Optional[int] = None
     user_id: int = 1  # future: from auth token
+    # v2 fields
+    mcq_subtype: Optional[str] = None           # MCQ-1 | MCQ-N | MCQ-FIB
+    syllabus_codes: Optional[List[str]] = None
+    reg_codes: Optional[List[str]] = None
+    sample_question_ids: Optional[List[int]] = None
+    question_bank_ids: Optional[List[int]] = None
 
 
 class ScenarioGenerateRequest(BaseModel):
@@ -38,6 +44,12 @@ class ScenarioGenerateRequest(BaseModel):
     kb_sample_ids: Optional[List[int]] = None
     session_id: Optional[int] = None
     user_id: int = 1
+    # v2 fields
+    mcq_subtype: Optional[str] = None
+    syllabus_codes: Optional[List[str]] = None
+    reg_codes: Optional[List[str]] = None
+    sample_question_ids: Optional[List[int]] = None
+    question_bank_ids: Optional[List[int]] = None
 
 
 class LongformGenerateRequest(BaseModel):
@@ -54,6 +66,12 @@ class LongformGenerateRequest(BaseModel):
     kb_sample_ids: Optional[List[int]] = None
     session_id: Optional[int] = None
     user_id: int = 1
+    # v2 fields
+    mcq_subtype: Optional[str] = None
+    syllabus_codes: Optional[List[str]] = None
+    reg_codes: Optional[List[str]] = None
+    sample_question_ids: Optional[List[int]] = None
+    question_bank_ids: Optional[List[int]] = None
 
 
 class RefineRequest(BaseModel):

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+import re
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List
 import json
@@ -296,3 +297,316 @@ DOCUMENT:
             saved_ids.append(cur.fetchone()[0])
 
     return {"created": len(saved_ids), "ids": saved_ids, "chunks": chunks}
+
+
+# ============================================================
+# v2: SYLLABUS — Upload CSV/Excel + Bulk Insert + Search
+# ============================================================
+
+@router.post("/syllabus/upload")
+async def upload_syllabus(
+    session_id: int = Form(...),
+    tax_type: str = Form(...),
+    file: UploadFile = File(...)
+):
+    """Parse CSV or Excel syllabus file, return preview rows."""
+    try:
+        import pandas as pd
+    except ImportError:
+        raise HTTPException(500, "pandas not installed")
+
+    if file.filename.endswith('.csv'):
+        df = pd.read_csv(file.file)
+    elif file.filename.endswith(('.xlsx', '.xls')):
+        df = pd.read_excel(file.file)
+    else:
+        raise HTTPException(400, "Only CSV or Excel files accepted")
+
+    df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
+    required = {'code', 'topics', 'detailed_syllabus'}
+    missing = required - set(df.columns)
+    if missing:
+        raise HTTPException(400, f"Missing required columns: {missing}")
+
+    rows = df[['code', 'topics', 'detailed_syllabus']].fillna('').to_dict('records')
+    return {"preview": rows[:5], "total": len(rows), "rows": rows}
+
+
+@router.post("/syllabus/bulk-insert")
+def bulk_insert_syllabus(data: dict):
+    """Confirm and insert parsed syllabus rows. Upserts on (session_id, tax_type, syllabus_code)."""
+    session_id = data['session_id']
+    tax_type = data['tax_type']
+    rows = data['rows']
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        for row in rows:
+            cur.execute("""
+                INSERT INTO kb_syllabus (session_id, tax_type, syllabus_code, topic, detailed_syllabus,
+                                        sac_thue, section_code, section_title, content)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (session_id, tax_type, syllabus_code) DO UPDATE
+                  SET topic = EXCLUDED.topic,
+                      detailed_syllabus = EXCLUDED.detailed_syllabus,
+                      section_title = EXCLUDED.detailed_syllabus,
+                      content = EXCLUDED.detailed_syllabus
+            """, (session_id, tax_type, row['code'], row['topics'], row['detailed_syllabus'],
+                  tax_type, row['code'], row['topics'], row['detailed_syllabus']))
+    return {"inserted": len(rows)}
+
+
+@router.get("/syllabus/search")
+def search_syllabus(session_id: Optional[int] = None, tax_type: Optional[str] = None, q: Optional[str] = None, limit: int = 20):
+    with get_db() as conn:
+        cur = conn.cursor()
+        query = """SELECT id, syllabus_code, topic, detailed_syllabus
+                   FROM kb_syllabus WHERE syllabus_code IS NOT NULL"""
+        params = []
+        if session_id:
+            query += " AND session_id = %s"
+            params.append(session_id)
+        if tax_type:
+            query += " AND (tax_type = %s OR sac_thue = %s)"
+            params += [tax_type, tax_type]
+        if q:
+            query += " AND (syllabus_code ILIKE %s OR topic ILIKE %s OR detailed_syllabus ILIKE %s)"
+            params += [f"%{q}%", f"%{q}%", f"%{q}%"]
+        query += " ORDER BY syllabus_code LIMIT %s"
+        params.append(limit)
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+
+
+# ============================================================
+# v2: REGULATIONS PARSED — AI Parse + CRUD + Search
+# ============================================================
+
+@router.post("/regulations/parse-doc")
+def parse_regulation_doc(data: dict):
+    """AI-parse a regulation document into kb_regulation_parsed rows."""
+    import os
+    from backend.context_builder import extract_text_from_file
+    from backend.config import DATA_DIR
+
+    session_id = data['session_id']
+    tax_type = data['tax_type']
+    file_path = data['file_path']
+    doc_ref = data.get('doc_ref', '')
+
+    full_path = os.path.join(DATA_DIR, file_path) if not file_path.startswith('/') else file_path
+    if not os.path.exists(full_path):
+        raise HTTPException(404, f"File not found: {file_path}")
+
+    text = extract_text_from_file(full_path)[:20000]
+
+    prompt = f"""Parse this Vietnamese tax regulation document into individual paragraphs.
+
+For each paragraph, extract:
+- article_no: article number (e.g. "Article 12" or "Điều 12")
+- paragraph_no: sequential number within that article (1, 2, 3...)
+- paragraph_text: the complete text of this paragraph
+- tags: 3-6 English keywords describing this paragraph's topic
+
+Return ONLY a valid JSON array:
+[
+  {{
+    "article_no": "Article 12",
+    "paragraph_no": 1,
+    "paragraph_text": "...",
+    "tags": "deductible,salary,expenses"
+  }}
+]
+
+DOCUMENT ({tax_type} — {doc_ref}):
+{text}"""
+
+    result = call_ai(prompt, model_tier="fast")
+    chunks = parse_ai_json_list(result['content'])
+
+    doc_slug = re.sub(r'[^A-Za-z0-9]', '', doc_ref.replace('/', '-').replace(' ', ''))[:20]
+    rows = []
+    with get_db() as conn:
+        cur = conn.cursor()
+        for chunk in chunks:
+            art = re.sub(r'[^0-9]', '', chunk.get('article_no', '0'))
+            p = chunk.get('paragraph_no', 0)
+            reg_code = f"{tax_type}-{doc_slug}-Art{art}-P{p}"
+            cur.execute("""
+                INSERT INTO kb_regulation_parsed
+                  (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no, paragraph_text, tags, source_file)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id, reg_code
+            """, (session_id, tax_type, reg_code, doc_ref,
+                  chunk.get('article_no'), chunk.get('paragraph_no'),
+                  chunk.get('paragraph_text', ''), chunk.get('tags', ''), file_path))
+            row = cur.fetchone()
+            rows.append({"id": row[0], "reg_code": row[1], **chunk})
+
+    return {"parsed": len(rows), "rows": rows}
+
+
+@router.get("/regulations/parsed")
+def list_parsed_regulations(session_id: Optional[int] = None, tax_type: Optional[str] = None,
+                             source_file: Optional[str] = None, limit: int = 200):
+    with get_db() as conn:
+        cur = conn.cursor()
+        query = """SELECT id, session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
+                          paragraph_text, syllabus_codes, tags, source_file, is_active, created_at
+                   FROM kb_regulation_parsed WHERE is_active = TRUE"""
+        params = []
+        if session_id:
+            query += " AND session_id = %s"
+            params.append(session_id)
+        if tax_type:
+            query += " AND tax_type = %s"
+            params.append(tax_type)
+        if source_file:
+            query += " AND source_file = %s"
+            params.append(source_file)
+        query += " ORDER BY tax_type, article_no, paragraph_no LIMIT %s"
+        params.append(limit)
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+
+
+@router.get("/regulations/search")
+def search_parsed_regulations(session_id: Optional[int] = None, tax_type: Optional[str] = None,
+                               q: Optional[str] = None, syllabus_codes: Optional[str] = None, limit: int = 20):
+    with get_db() as conn:
+        cur = conn.cursor()
+        query = "SELECT id, reg_code, doc_ref, paragraph_text FROM kb_regulation_parsed WHERE is_active = TRUE"
+        params = []
+        if session_id:
+            query += " AND session_id = %s"
+            params.append(session_id)
+        if tax_type:
+            query += " AND tax_type = %s"
+            params.append(tax_type)
+        if q:
+            query += " AND (reg_code ILIKE %s OR paragraph_text ILIKE %s OR tags ILIKE %s)"
+            params += [f"%{q}%", f"%{q}%", f"%{q}%"]
+        if syllabus_codes:
+            codes = [c.strip() for c in syllabus_codes.split(',') if c.strip()]
+            if codes:
+                query += " AND syllabus_codes && %s"
+                params.append(codes)
+        query += " ORDER BY reg_code LIMIT %s"
+        params.append(limit)
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+
+
+@router.put("/regulation-parsed/{item_id}")
+def update_parsed_regulation(item_id: int, data: dict):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE kb_regulation_parsed SET
+                paragraph_text = COALESCE(%s, paragraph_text),
+                syllabus_codes = COALESCE(%s, syllabus_codes),
+                tags = COALESCE(%s, tags)
+            WHERE id = %s
+        """, (data.get('paragraph_text'), data.get('syllabus_codes'), data.get('tags'), item_id))
+    return {"ok": True}
+
+
+@router.delete("/regulation-parsed/{item_id}")
+def delete_parsed_regulation(item_id: int):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM kb_regulation_parsed WHERE id = %s", (item_id,))
+    return {"ok": True}
+
+
+# ============================================================
+# v2: TAX RATES — Upload + CRUD
+# ============================================================
+
+@router.get("/tax-rates")
+def list_tax_rates(session_id: Optional[int] = None, tax_type: Optional[str] = None):
+    with get_db() as conn:
+        cur = conn.cursor()
+        query = """SELECT id, session_id, tax_type, table_name, content, source_file, display_order, is_active, created_at
+                   FROM kb_tax_rates WHERE is_active = TRUE"""
+        params = []
+        if session_id:
+            query += " AND session_id = %s"
+            params.append(session_id)
+        if tax_type:
+            query += " AND tax_type = %s"
+            params.append(tax_type)
+        query += " ORDER BY tax_type, display_order, id"
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+
+
+@router.post("/tax-rates/upload")
+async def upload_tax_rates(
+    session_id: int = Form(...),
+    tax_type: str = Form(...),
+    table_name: str = Form(...),
+    file: UploadFile = File(...)
+):
+    """Read CSV/Excel and convert to HTML table, save to kb_tax_rates."""
+    try:
+        import pandas as pd
+    except ImportError:
+        raise HTTPException(500, "pandas not installed")
+
+    if file.filename.endswith('.csv'):
+        df = pd.read_csv(file.file)
+    else:
+        df = pd.read_excel(file.file)
+
+    html = df.to_html(index=False, classes='tax-rate-table', border=0)
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO kb_tax_rates (session_id, tax_type, table_name, content, source_file) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (session_id, tax_type, table_name, html, file.filename)
+        )
+        return {"id": cur.fetchone()[0]}
+
+
+@router.post("/tax-rates")
+def create_tax_rate(data: dict):
+    """Create a tax rate entry manually (rich text content)."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO kb_tax_rates (session_id, tax_type, table_name, content, display_order) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (data['session_id'], data['tax_type'], data['table_name'], data['content'], data.get('display_order', 0))
+        )
+        return {"id": cur.fetchone()[0]}
+
+
+@router.put("/tax-rates/{item_id}")
+def update_tax_rate(item_id: int, data: dict):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE kb_tax_rates SET
+                table_name = COALESCE(%s, table_name),
+                content = COALESCE(%s, content),
+                display_order = COALESCE(%s, display_order)
+            WHERE id = %s
+        """, (data.get('table_name'), data.get('content'), data.get('display_order'), item_id))
+    return {"ok": True}
+
+
+@router.delete("/tax-rates/{item_id}")
+def delete_tax_rate(item_id: int):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM kb_tax_rates WHERE id = %s", (item_id,))
+    return {"ok": True}

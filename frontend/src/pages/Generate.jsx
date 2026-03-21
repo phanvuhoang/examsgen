@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import KBMultiSelect from '../components/KBMultiSelect'
+import ReferenceMultiSelect from '../components/ReferenceMultiSelect'
 
 const SAC_THUE_OPTIONS = ['CIT', 'VAT', 'PIT', 'FCT', 'TP', 'ADMIN']
 const QUESTION_MAP = {
@@ -27,6 +28,17 @@ export default function Generate() {
   const [kbSyllabusIds, setKbSyllabusIds] = useState([])
   const [kbRegulationIds, setKbRegulationIds] = useState([])
   const [kbSampleIds, setKbSampleIds] = useState([])
+  // v2: Reference Materials
+  const [mcqSubtype, setMcqSubtype] = useState('')
+  const [selectedSyllabusCodes, setSelectedSyllabusCodes] = useState([])
+  const [syllabusChipLabels, setSyllabusChipLabels] = useState({})
+  const [selectedRegCodes, setSelectedRegCodes] = useState([])
+  const [regChipLabels, setRegChipLabels] = useState({})
+  const [selectedSampleIds, setSelectedSampleIds] = useState([])
+  const [sampleChipLabels, setSampleChipLabels] = useState({})
+  const [selectedQbIds, setSelectedQbIds] = useState([])
+  const [qbChipLabels, setQbChipLabels] = useState({})
+
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -76,6 +88,12 @@ export default function Generate() {
         kb_sample_ids: kbSampleIds.length ? kbSampleIds : null,
         session_id: currentSession?.id || null,
         provider: provider || null,
+        // v2 Reference Materials
+        mcq_subtype: mcqSubtype || null,
+        syllabus_codes: selectedSyllabusCodes.length ? selectedSyllabusCodes : null,
+        reg_codes: selectedRegCodes.length ? selectedRegCodes : null,
+        sample_question_ids: selectedSampleIds.length ? selectedSampleIds : null,
+        question_bank_ids: selectedQbIds.length ? selectedQbIds : null,
       }
       let data
       if (type === 'mcq') {
@@ -340,10 +358,10 @@ export default function Generate() {
                   </p>
                 </div>
 
-                {/* KB Targeting */}
+                {/* KB Targeting (legacy) */}
                 <div className="border-t pt-4 mt-2">
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                    Knowledge Base Targeting
+                    Knowledge Base Targeting (legacy)
                   </p>
                   <KBMultiSelect
                     label="Syllabus items to test"
@@ -368,6 +386,89 @@ export default function Generate() {
                     onChange={setKbSampleIds}
                     displayKey="title"
                     hintKey="exam_tricks"
+                  />
+                </div>
+
+                {/* v2 Reference Materials */}
+                <div className="border-t pt-4 mt-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                    Reference Materials (v2)
+                  </p>
+
+                  {/* MCQ Subtype */}
+                  {type === 'mcq' && (
+                    <div className="mb-3">
+                      <label className="text-xs font-medium block mb-1">MCQ Format</label>
+                      <select value={mcqSubtype} onChange={(e) => setMcqSubtype(e.target.value)}
+                        className="border rounded px-3 py-1.5 text-sm w-48">
+                        <option value="">Auto (mixed)</option>
+                        <option value="MCQ-1">Single correct answer</option>
+                        <option value="MCQ-N">Multiple correct answers</option>
+                        <option value="MCQ-FIB">Fill in the blank</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <ReferenceMultiSelect
+                    label="Syllabus items to focus on"
+                    placeholder="Search by code or topic... e.g. B2a, deductible"
+                    fetchFn={(q) => api.searchKBSyllabus({ session_id: currentSession?.id, tax_type: sac_thue, q })}
+                    displayFn={(item) => `[${item.syllabus_code}] ${(item.detailed_syllabus || item.topic || '').substring(0, 80)}`}
+                    selected={selectedSyllabusCodes}
+                    onSelect={(item) => {
+                      const code = item.syllabus_code
+                      if (!selectedSyllabusCodes.includes(code)) {
+                        setSelectedSyllabusCodes((p) => [...p, code])
+                        setSyllabusChipLabels((p) => ({ ...p, [code]: `[${code}] ${(item.detailed_syllabus || item.topic || '').substring(0, 60)}` }))
+                      }
+                    }}
+                    onRemove={(code) => setSelectedSyllabusCodes((p) => p.filter((c) => c !== code))}
+                  />
+
+                  <ReferenceMultiSelect
+                    label="Regulation paragraphs to cite"
+                    placeholder="Search by RegCode or text... e.g. CIT-ND320, salary"
+                    fetchFn={(q) => api.searchParsedRegulations({ session_id: currentSession?.id, tax_type: sac_thue, q })}
+                    displayFn={(item) => `[${item.reg_code}] ${(item.paragraph_text || '').substring(0, 80)}`}
+                    selected={selectedRegCodes}
+                    onSelect={(item) => {
+                      const code = item.reg_code
+                      if (!selectedRegCodes.includes(code)) {
+                        setSelectedRegCodes((p) => [...p, code])
+                        setRegChipLabels((p) => ({ ...p, [code]: `[${code}] ${(item.paragraph_text || '').substring(0, 60)}` }))
+                      }
+                    }}
+                    onRemove={(code) => setSelectedRegCodes((p) => p.filter((c) => c !== code))}
+                  />
+
+                  <ReferenceMultiSelect
+                    label="Style references (past exam samples)"
+                    placeholder="Search by title or content..."
+                    fetchFn={(q) => api.searchSampleQuestions({ question_type: type.toUpperCase(), tax_type: sac_thue, q })}
+                    displayFn={(item) => `[${item.question_type}•${item.tax_type}] ${item.title || item.id}`}
+                    selected={selectedSampleIds}
+                    onSelect={(item) => {
+                      if (!selectedSampleIds.includes(item.id)) {
+                        setSelectedSampleIds((p) => [...p, item.id])
+                        setSampleChipLabels((p) => ({ ...p, [item.id]: `[${item.question_type}•${item.tax_type}] ${item.title || item.id}` }))
+                      }
+                    }}
+                    onRemove={(id) => setSelectedSampleIds((p) => p.filter((i) => i !== id))}
+                  />
+
+                  <ReferenceMultiSelect
+                    label="Question bank references"
+                    placeholder="Search from generated questions..."
+                    fetchFn={(q) => api.searchQuestions({ question_type: type.toUpperCase(), sac_thue, q })}
+                    displayFn={(item) => `[${item.question_type}•${item.sac_thue}] ${item.question_number || item.id} (${item.created_at?.substring(0, 10)})`}
+                    selected={selectedQbIds}
+                    onSelect={(item) => {
+                      if (!selectedQbIds.includes(item.id)) {
+                        setSelectedQbIds((p) => [...p, item.id])
+                        setQbChipLabels((p) => ({ ...p, [item.id]: `[${item.question_type}•${item.sac_thue}] ${item.question_number || item.id}` }))
+                      }
+                    }}
+                    onRemove={(id) => setSelectedQbIds((p) => p.filter((i) => i !== id))}
                   />
                 </div>
               </div>

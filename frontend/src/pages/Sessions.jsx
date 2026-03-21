@@ -1,6 +1,234 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api'
 
+// ── Settings Panel ────────────────────────────────────────────────────────────
+
+function SessionSettingsPanel({ session }) {
+  const [settings, setSettings] = useState({ parameters: [], tax_types: [], question_types: [] })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [openSection, setOpenSection] = useState(null) // 'params' | 'taxes' | 'qtypes'
+  const [editQType, setEditQType] = useState(null)     // {parentIdx, subtypeIdx} or null
+  const [editQForm, setEditQForm] = useState({})
+
+  useEffect(() => {
+    api.getSessionSettings(session.id)
+      .then((d) => setSettings(d))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [session.id])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.patchSessionSettings(session.id, settings)
+      alert('Settings saved')
+    } catch (err) { alert('Save failed: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  // ── Parameters helpers
+  const addParam = () => setSettings((s) => ({
+    ...s, parameters: [...s.parameters, { key: '', value: '', unit: '' }]
+  }))
+  const setParam = (i, field, val) => setSettings((s) => {
+    const p = [...s.parameters]
+    p[i] = { ...p[i], [field]: val }
+    return { ...s, parameters: p }
+  })
+  const removeParam = (i) => setSettings((s) => ({
+    ...s, parameters: s.parameters.filter((_, idx) => idx !== i)
+  }))
+
+  // ── Tax Types helpers
+  const addTax = () => setSettings((s) => ({
+    ...s, tax_types: [...s.tax_types, { code: '', name: '' }]
+  }))
+  const setTax = (i, field, val) => setSettings((s) => {
+    const t = [...s.tax_types]
+    t[i] = { ...t[i], [field]: val }
+    return { ...s, tax_types: t }
+  })
+  const removeTax = (i) => setSettings((s) => ({
+    ...s, tax_types: s.tax_types.filter((_, idx) => idx !== i)
+  }))
+
+  // ── Question Types helpers
+  const addQType = () => setSettings((s) => ({
+    ...s, question_types: [...s.question_types, { code: '', name: '', subtypes: [] }]
+  }))
+  const removeQType = (i) => setSettings((s) => ({
+    ...s, question_types: s.question_types.filter((_, idx) => idx !== i)
+  }))
+  const addSubtype = (i) => setSettings((s) => {
+    const qt = [...s.question_types]
+    qt[i] = { ...qt[i], subtypes: [...(qt[i].subtypes || []), { code: '', name: '', description: '', sample: '' }] }
+    return { ...s, question_types: qt }
+  })
+  const removeSubtype = (i, j) => setSettings((s) => {
+    const qt = [...s.question_types]
+    qt[i] = { ...qt[i], subtypes: qt[i].subtypes.filter((_, idx) => idx !== j) }
+    return { ...s, question_types: qt }
+  })
+  const openEdit = (parentIdx, subtypeIdx) => {
+    const qt = settings.question_types[parentIdx]
+    const item = subtypeIdx === -1 ? qt : qt.subtypes[subtypeIdx]
+    setEditQForm({ ...item })
+    setEditQType({ parentIdx, subtypeIdx })
+  }
+  const saveEditQ = () => {
+    const { parentIdx, subtypeIdx } = editQType
+    setSettings((s) => {
+      const qt = [...s.question_types]
+      if (subtypeIdx === -1) {
+        qt[parentIdx] = { ...qt[parentIdx], name: editQForm.name, description: editQForm.description, sample: editQForm.sample }
+      } else {
+        const subs = [...qt[parentIdx].subtypes]
+        subs[subtypeIdx] = { ...subs[subtypeIdx], ...editQForm }
+        qt[parentIdx] = { ...qt[parentIdx], subtypes: subs }
+      }
+      return { ...s, question_types: qt }
+    })
+    setEditQType(null)
+  }
+
+  if (loading) return <div className="text-xs text-gray-400 py-2">Loading settings...</div>
+
+  const toggle = (s) => setOpenSection(openSection === s ? null : s)
+
+  return (
+    <div className="mt-4 border-t pt-4 space-y-3">
+      {/* Section A: Economic Parameters */}
+      <div className="border rounded-lg overflow-hidden">
+        <button onClick={() => toggle('params')}
+          className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 text-sm font-medium hover:bg-gray-100">
+          <span>Economic Parameters ({settings.parameters.length})</span>
+          <span>{openSection === 'params' ? '▲' : '▼'}</span>
+        </button>
+        {openSection === 'params' && (
+          <div className="p-4 space-y-2">
+            {settings.parameters.map((p, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <input value={p.key} onChange={(e) => setParam(i, 'key', e.target.value)}
+                  placeholder="Key" className="flex-1 border rounded px-2 py-1 text-xs" />
+                <input value={p.value} onChange={(e) => setParam(i, 'value', e.target.value)}
+                  placeholder="Value" className="w-28 border rounded px-2 py-1 text-xs" />
+                <input value={p.unit} onChange={(e) => setParam(i, 'unit', e.target.value)}
+                  placeholder="Unit" className="w-20 border rounded px-2 py-1 text-xs" />
+                <button onClick={() => removeParam(i)} className="text-red-400 hover:text-red-600 text-sm">✕</button>
+              </div>
+            ))}
+            <button onClick={addParam} className="text-xs text-brand-600 hover:underline mt-1">+ Add Parameter</button>
+          </div>
+        )}
+      </div>
+
+      {/* Section B: Tax Types */}
+      <div className="border rounded-lg overflow-hidden">
+        <button onClick={() => toggle('taxes')}
+          className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 text-sm font-medium hover:bg-gray-100">
+          <span>Tax Types ({settings.tax_types.length})</span>
+          <span>{openSection === 'taxes' ? '▲' : '▼'}</span>
+        </button>
+        {openSection === 'taxes' && (
+          <div className="p-4 space-y-2">
+            {settings.tax_types.map((t, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <input value={t.code} onChange={(e) => setTax(i, 'code', e.target.value)}
+                  placeholder="Code" className="w-24 border rounded px-2 py-1 text-xs font-mono" />
+                <input value={t.name} onChange={(e) => setTax(i, 'name', e.target.value)}
+                  placeholder="Full Name" className="flex-1 border rounded px-2 py-1 text-xs" />
+                <button onClick={() => removeTax(i)} className="text-red-400 hover:text-red-600 text-sm">✕</button>
+              </div>
+            ))}
+            <button onClick={addTax} className="text-xs text-brand-600 hover:underline mt-1">+ Add Tax Type</button>
+          </div>
+        )}
+      </div>
+
+      {/* Section C: Question Types */}
+      <div className="border rounded-lg overflow-hidden">
+        <button onClick={() => toggle('qtypes')}
+          className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 text-sm font-medium hover:bg-gray-100">
+          <span>Question Types ({settings.question_types.length})</span>
+          <span>{openSection === 'qtypes' ? '▲' : '▼'}</span>
+        </button>
+        {openSection === 'qtypes' && (
+          <div className="p-4 space-y-3">
+            {settings.question_types.map((qt, i) => (
+              <div key={i} className="border rounded-lg overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 bg-gray-50">
+                  <span className="font-mono text-xs font-bold text-brand-700 w-20">{qt.code}</span>
+                  <span className="flex-1 text-xs">{qt.name}</span>
+                  <button onClick={() => openEdit(i, -1)} className="text-xs text-blue-500 hover:underline">Edit</button>
+                  <button onClick={() => removeQType(i)} className="text-xs text-red-500 hover:underline">✕</button>
+                </div>
+                {(qt.subtypes || []).length > 0 && (
+                  <div className="pl-6 border-t divide-y">
+                    {qt.subtypes.map((st, j) => (
+                      <div key={j} className="flex items-center gap-2 px-3 py-1.5">
+                        <span className="font-mono text-xs text-gray-500 w-20">{st.code}</span>
+                        <span className="flex-1 text-xs">{st.name}</span>
+                        <button onClick={() => openEdit(i, j)} className="text-xs text-blue-500 hover:underline">Edit</button>
+                        <button onClick={() => removeSubtype(i, j)} className="text-xs text-red-500 hover:underline">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="px-6 py-1.5 border-t">
+                  <button onClick={() => addSubtype(i)} className="text-xs text-brand-600 hover:underline">+ Add subtype</button>
+                </div>
+              </div>
+            ))}
+            <button onClick={addQType} className="text-xs text-brand-600 hover:underline">+ Add Question Type</button>
+          </div>
+        )}
+      </div>
+
+      <button onClick={save} disabled={saving}
+        className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 disabled:opacity-50">
+        {saving ? 'Saving...' : 'Save Settings'}
+      </button>
+
+      {/* Edit Q-Type Modal */}
+      {editQType && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-5 w-full max-w-lg mx-4">
+            <h4 className="font-semibold mb-3 text-sm">Edit {editQType.subtypeIdx === -1 ? 'Question Type' : 'Subtype'}</h4>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium block mb-1">Code</label>
+                <input value={editQForm.code || ''} disabled className="w-full border rounded px-2 py-1.5 text-sm bg-gray-50" />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1">Name</label>
+                <input value={editQForm.name || ''} onChange={(e) => setEditQForm({ ...editQForm, name: e.target.value })}
+                  className="w-full border rounded px-2 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1">Description</label>
+                <textarea value={editQForm.description || ''} onChange={(e) => setEditQForm({ ...editQForm, description: e.target.value })}
+                  rows={3} className="w-full border rounded px-2 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1">Sample</label>
+                <textarea value={editQForm.sample || ''} onChange={(e) => setEditQForm({ ...editQForm, sample: e.target.value })}
+                  rows={4} className="w-full border rounded px-2 py-1.5 text-sm font-mono text-xs" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={saveEditQ} className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg">Save</button>
+              <button onClick={() => setEditQType(null)} className="px-4 py-2 border text-sm rounded-lg">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
 export default function Sessions() {
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -12,6 +240,7 @@ export default function Sessions() {
   })
   const [cloneFrom, setCloneFrom] = useState('')
   const [saving, setSaving] = useState(false)
+  const [expandedSettings, setExpandedSettings] = useState({})
 
   const fetchSessions = async () => {
     try {
@@ -177,7 +406,7 @@ export default function Sessions() {
       )}
 
       {/* Session Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="space-y-4">
         {sessions.map((s) => (
           <div key={s.id} className={`bg-white rounded-xl border p-5 ${s.is_default ? 'ring-2 ring-brand-500' : ''}`}>
             <div className="flex items-start justify-between mb-3">
@@ -187,9 +416,18 @@ export default function Sessions() {
                   <span className="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full">Active</span>
                 )}
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                {!s.is_default && (
+                  <button onClick={() => api.setDefaultSession(s.id).then(fetchSessions)}
+                    className="text-xs text-gray-500 hover:text-brand-600 border rounded px-2 py-1">Set Active</button>
+                )}
                 <button onClick={() => handleEdit(s)}
                   className="text-xs text-brand-600 hover:underline">Edit</button>
+                <button
+                  onClick={() => setExpandedSettings((p) => ({ ...p, [s.id]: !p[s.id] }))}
+                  className="text-xs text-green-600 hover:underline">
+                  {expandedSettings[s.id] ? 'Hide Settings' : 'Settings'}
+                </button>
                 <button onClick={() => handleDeleteClick(s)}
                   className="text-xs text-red-500 hover:underline">Delete</button>
               </div>
@@ -224,6 +462,9 @@ export default function Sessions() {
                 )}
               </div>
             )}
+
+            {/* Settings Panel */}
+            {expandedSettings[s.id] && <SessionSettingsPanel session={s} />}
           </div>
         ))}
       </div>

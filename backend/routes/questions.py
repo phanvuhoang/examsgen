@@ -71,6 +71,42 @@ def list_questions(
     }
 
 
+@router.get("/search")
+def search_questions(
+    question_type: Optional[str] = None,
+    sac_thue: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = 20,
+):
+    """Search questions — used in Generate page reference picker."""
+    conditions = []
+    params = []
+    if question_type:
+        type_map = {"mcq": "MCQ", "scenario": "SCENARIO_10", "longform": "LONGFORM_15"}
+        db_type = type_map.get(question_type.lower(), question_type)
+        conditions.append("question_type = %s")
+        params.append(db_type)
+    if sac_thue:
+        conditions.append("sac_thue = %s")
+        params.append(sac_thue)
+    if q:
+        conditions.append("(content_json::text ILIKE %s)")
+        params.append(f"%{q}%")
+
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, question_type, sac_thue, question_number, created_at "
+            f"FROM questions {where} ORDER BY created_at DESC LIMIT %s",
+            params + [limit],
+        )
+        rows = cur.fetchall()
+    return [{"id": r[0], "question_type": r[1], "sac_thue": r[2],
+             "question_number": r[3], "created_at": r[4].isoformat() if r[4] else None}
+            for r in rows]
+
+
 @router.get("/for-reference")
 def get_questions_for_reference(
     type: Optional[str] = None,

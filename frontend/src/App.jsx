@@ -7,6 +7,7 @@ import Sessions from './pages/Sessions'
 import Generate from './pages/Generate'
 import KnowledgeBase from './pages/KnowledgeBase'
 import QuestionBank from './pages/QuestionBank'
+import SampleQuestions from './pages/SampleQuestions'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/generate" element={<Generate />} />
         <Route path="/kb" element={<KnowledgeBase />} />
         <Route path="/bank" element={<QuestionBank />} />
+        <Route path="/sample-questions" element={<SampleQuestions />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/login" element={<Navigate to="/" />} />
         <Route path="*" element={<Navigate to="/" />} />

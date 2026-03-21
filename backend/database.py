@@ -158,7 +158,84 @@ def init_db():
             UPDATE kb_sample SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
             UPDATE questions SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
             UPDATE regulations SET session_id = (SELECT id FROM exam_sessions WHERE is_default = TRUE) WHERE session_id IS NULL;
+
+            -- v2: exam_sessions — session settings columns
+            ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS parameters JSONB DEFAULT '[]';
+            ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS tax_types JSONB DEFAULT '[]';
+            ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS question_types JSONB DEFAULT '[]';
+
+            -- v2: kb_syllabus — new structured fields
+            ALTER TABLE kb_syllabus ADD COLUMN IF NOT EXISTS tax_type VARCHAR(30);
+            ALTER TABLE kb_syllabus ADD COLUMN IF NOT EXISTS syllabus_code VARCHAR(50);
+            ALTER TABLE kb_syllabus ADD COLUMN IF NOT EXISTS topic VARCHAR(300);
+            ALTER TABLE kb_syllabus ADD COLUMN IF NOT EXISTS detailed_syllabus TEXT;
         """)
+        # v2: new tables
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_syllabus_session_code
+              ON kb_syllabus(session_id, tax_type, syllabus_code)
+              WHERE syllabus_code IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS kb_regulation_parsed (
+                id SERIAL PRIMARY KEY,
+                session_id INTEGER REFERENCES exam_sessions(id),
+                tax_type VARCHAR(30) NOT NULL,
+                reg_code VARCHAR(100),
+                doc_ref VARCHAR(200),
+                article_no VARCHAR(50),
+                paragraph_no INTEGER,
+                paragraph_text TEXT NOT NULL,
+                syllabus_codes TEXT[],
+                tags VARCHAR(500),
+                source_file VARCHAR(300),
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS kb_tax_rates (
+                id SERIAL PRIMARY KEY,
+                session_id INTEGER REFERENCES exam_sessions(id),
+                tax_type VARCHAR(30) NOT NULL,
+                table_name VARCHAR(200) NOT NULL,
+                content TEXT NOT NULL,
+                source_file VARCHAR(300),
+                display_order INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS sample_questions (
+                id SERIAL PRIMARY KEY,
+                question_type VARCHAR(20) NOT NULL,
+                question_subtype VARCHAR(30),
+                tax_type VARCHAR(30) NOT NULL,
+                title VARCHAR(300),
+                content TEXT NOT NULL,
+                answer TEXT,
+                marks INTEGER,
+                exam_ref VARCHAR(200),
+                syllabus_codes TEXT[],
+                reg_codes TEXT[],
+                tags VARCHAR(500),
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+
+            -- v2: questions table — tagging fields
+            ALTER TABLE questions ADD COLUMN IF NOT EXISTS mcq_subtype VARCHAR(30);
+            ALTER TABLE questions ADD COLUMN IF NOT EXISTS syllabus_codes TEXT[];
+            ALTER TABLE questions ADD COLUMN IF NOT EXISTS reg_codes TEXT[];
+        """)
+
+        # v2: seed default settings for existing sessions
+        cur.execute("""
+            UPDATE exam_sessions SET
+                parameters = '[{"key":"USD Exchange Rate","value":"26500","unit":"VND"},{"key":"Monthly Base Salary (SHUI)","value":"46800000","unit":"VND"}]'::jsonb,
+                tax_types = '[{"code":"CIT","name":"Corporate Income Tax"},{"code":"PIT","name":"Personal Income Tax"},{"code":"FCT","name":"Foreign Contractor Tax"},{"code":"VAT","name":"Value Added Tax"},{"code":"TAX-ADMIN","name":"Tax Administration"},{"code":"TP","name":"Transfer Pricing"}]'::jsonb,
+                question_types = '[{"code":"MCQ","name":"Multiple Choice","subtypes":[{"code":"MCQ-1","name":"Single correct answer","description":"One correct answer out of 4 options","sample":""},{"code":"MCQ-N","name":"Multiple correct answers","description":"Two or more correct options. Candidates select all that apply.","sample":""},{"code":"MCQ-FIB","name":"Fill in the blank (words)","description":"Candidate fills missing word(s). Provide word bank.","sample":""}]},{"code":"SCENARIO","name":"Scenario Question (10-15 marks)","subtypes":[]},{"code":"LONGFORM","name":"Long-form Question (15-25 marks)","subtypes":[]}]'::jsonb
+            WHERE parameters = '[]'::jsonb OR parameters IS NULL
+        """)
+
         # Create session folders on disk
         cur.execute("SELECT folder_path FROM exam_sessions WHERE folder_path IS NOT NULL")
         for (fp,) in cur.fetchall():
