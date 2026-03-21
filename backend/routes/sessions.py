@@ -142,11 +142,13 @@ def set_default_session(session_id: int):
 
 @router.post("/{session_id}/clone-from/{source_id}")
 def clone_session(session_id: int, source_id: int):
-    """Copy all KB items and settings from source session into target session."""
+    """Copy all KB items and settings from source session into target session.
+    Safe to run multiple times — clears target KB before copying.
+    """
     with get_db() as conn:
         cur = conn.cursor()
 
-        # Copy session settings (parameters, tax_types, question_types)
+        # 1. Copy session settings (parameters, tax_types, question_types)
         cur.execute("""
             UPDATE exam_sessions t SET
                 parameters = s.parameters,
@@ -156,46 +158,63 @@ def clone_session(session_id: int, source_id: int):
             WHERE s.id = %s AND t.id = %s
         """, (source_id, session_id))
 
-        # Copy kb_syllabus
+        # 2. Clear target KB before copying (makes clone idempotent)
+        cur.execute("DELETE FROM kb_syllabus WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM kb_regulation WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM kb_regulation_parsed WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM kb_tax_rates WHERE session_id = %s", (session_id,))
+        cur.execute("DELETE FROM kb_sample WHERE session_id = %s", (session_id,))
+
+        # 3. Copy kb_syllabus
         cur.execute("""
-            INSERT INTO kb_syllabus (sac_thue, section_code, section_title, content, tags, source_file, is_active, session_id,
+            INSERT INTO kb_syllabus (sac_thue, section_code, section_title, content, tags,
+                                     source_file, is_active, session_id,
                                      tax_type, syllabus_code, topic, detailed_syllabus)
-            SELECT sac_thue, section_code, section_title, content, tags, source_file, is_active, %s,
+            SELECT sac_thue, section_code, section_title, content, tags,
+                   source_file, is_active, %s,
                    tax_type, syllabus_code, topic, detailed_syllabus
             FROM kb_syllabus WHERE session_id = %s
         """, (session_id, source_id))
 
-        # Copy kb_regulation
+        # 4. Copy kb_regulation
         cur.execute("""
-            INSERT INTO kb_regulation (sac_thue, regulation_ref, content, tags, syllabus_ids, source_file, is_active, session_id)
-            SELECT sac_thue, regulation_ref, content, tags, '{}', source_file, is_active, %s
+            INSERT INTO kb_regulation (sac_thue, regulation_ref, content, tags,
+                                       source_file, is_active, session_id)
+            SELECT sac_thue, regulation_ref, content, tags,
+                   source_file, is_active, %s
             FROM kb_regulation WHERE session_id = %s
         """, (session_id, source_id))
 
-        # Copy kb_regulation_parsed
+        # 5. Copy kb_regulation_parsed
         cur.execute("""
-            INSERT INTO kb_regulation_parsed (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
-                                              paragraph_text, syllabus_codes, tags, source_file, is_active)
-            SELECT %s, tax_type, reg_code, doc_ref, article_no, paragraph_no,
-                   paragraph_text, syllabus_codes, tags, source_file, is_active
+            INSERT INTO kb_regulation_parsed (session_id, tax_type, reg_code, doc_ref,
+                                              article_no, paragraph_no, paragraph_text,
+                                              syllabus_codes, tags, source_file, is_active)
+            SELECT %s, tax_type, reg_code, doc_ref,
+                   article_no, paragraph_no, paragraph_text,
+                   syllabus_codes, tags, source_file, is_active
             FROM kb_regulation_parsed WHERE session_id = %s
         """, (session_id, source_id))
 
-        # Copy kb_tax_rates
+        # 6. Copy kb_tax_rates
         cur.execute("""
-            INSERT INTO kb_tax_rates (session_id, tax_type, table_name, content, source_file, display_order, is_active)
-            SELECT %s, tax_type, table_name, content, source_file, display_order, is_active
+            INSERT INTO kb_tax_rates (session_id, tax_type, table_name, content,
+                                      source_file, display_order, is_active)
+            SELECT %s, tax_type, table_name, content,
+                   source_file, display_order, is_active
             FROM kb_tax_rates WHERE session_id = %s
         """, (session_id, source_id))
 
-        # Copy kb_sample
+        # 7. Copy kb_sample
         cur.execute("""
-            INSERT INTO kb_sample (question_type, sac_thue, title, content, exam_tricks, syllabus_ids, regulation_ids, source, session_id)
-            SELECT question_type, sac_thue, title, content, exam_tricks, '{}', '{}', source, %s
+            INSERT INTO kb_sample (question_type, sac_thue, title, content, exam_tricks,
+                                   source, session_id)
+            SELECT question_type, sac_thue, title, content, exam_tricks,
+                   source, %s
             FROM kb_sample WHERE session_id = %s
         """, (session_id, source_id))
 
-    # Copy uploaded files via shutil
+    # 8. Copy uploaded files (regulations, syllabus, samples folders)
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT folder_path FROM exam_sessions WHERE id = %s", (source_id,))
@@ -214,7 +233,24 @@ def clone_session(session_id: int, source_id: int):
                     shutil.rmtree(dst_path)
                 shutil.copytree(src_path, dst_path)
 
-    return {"ok": True, "message": f"KB cloned from session {source_id}"}
+    # Count what was cloned for response
+    with get_db() as conn:
+        cur = conn.cursor()
+        counts = {}
+        for table, col in [
+            ('kb_syllabus', 'syllabus'),
+            ('kb_regulation_parsed', 'reg_paragraphs'),
+            ('kb_tax_rates', 'tax_rates'),
+            ('kb_sample', 'kb_samples'),
+        ]:
+            cur.execute(f"SELECT COUNT(*) FROM {table} WHERE session_id = %s", (session_id,))
+            counts[col] = cur.fetchone()[0]
+
+    return {
+        "ok": True,
+        "message": f"KB cloned from session {source_id}",
+        "cloned": counts
+    }
 
 
 @router.post("/{session_id}/parse-and-match")

@@ -19,6 +19,7 @@ class SampleQuestionCreate(BaseModel):
     syllabus_codes: Optional[List[str]] = None
     reg_codes: Optional[List[str]] = None
     tags: Optional[str] = None
+    exam_session_id: Optional[int] = None
 
 
 class SampleQuestionUpdate(SampleQuestionCreate):
@@ -32,13 +33,15 @@ def list_sample_questions(
     subtype: Optional[str] = None,
     search: Optional[str] = None,
     syllabus_code: Optional[str] = None,
+    exam_session_id: Optional[int] = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
 ):
     with get_db() as conn:
         cur = conn.cursor()
         query = """SELECT id, question_type, question_subtype, tax_type, title, content, answer,
-                          marks, exam_ref, syllabus_codes, reg_codes, tags, is_active, created_at
+                          marks, exam_ref, syllabus_codes, reg_codes, tags, is_active, created_at,
+                          exam_session_id
                    FROM sample_questions WHERE is_active = TRUE"""
         params = []
         if question_type:
@@ -56,8 +59,11 @@ def list_sample_questions(
         if syllabus_code:
             query += " AND syllabus_codes @> %s"
             params.append([syllabus_code])
+        if exam_session_id:
+            query += " AND exam_session_id = %s"
+            params.append(exam_session_id)
         count_query = query.replace(
-            "SELECT id, question_type, question_subtype, tax_type, title, content, answer,\n                          marks, exam_ref, syllabus_codes, reg_codes, tags, is_active, created_at",
+            "SELECT id, question_type, question_subtype, tax_type, title, content, answer,\n                          marks, exam_ref, syllabus_codes, reg_codes, tags, is_active, created_at,\n                          exam_session_id",
             "SELECT COUNT(*)"
         )
         cur.execute(count_query, params)
@@ -102,13 +108,15 @@ def get_sample_question(item_id: int):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""SELECT id, question_type, question_subtype, tax_type, title, content, answer,
-                              marks, exam_ref, syllabus_codes, reg_codes, tags, is_active, created_at
+                              marks, exam_ref, syllabus_codes, reg_codes, tags, is_active, created_at,
+                              exam_session_id
                        FROM sample_questions WHERE id = %s""", (item_id,))
         row = cur.fetchone()
     if not row:
         raise HTTPException(404, "Sample question not found")
     cols = ['id', 'question_type', 'question_subtype', 'tax_type', 'title', 'content', 'answer',
-            'marks', 'exam_ref', 'syllabus_codes', 'reg_codes', 'tags', 'is_active', 'created_at']
+            'marks', 'exam_ref', 'syllabus_codes', 'reg_codes', 'tags', 'is_active', 'created_at',
+            'exam_session_id']
     return dict(zip(cols, row))
 
 
@@ -119,11 +127,12 @@ def create_sample_question(item: SampleQuestionCreate):
         cur.execute("""
             INSERT INTO sample_questions
               (question_type, question_subtype, tax_type, title, content, answer, marks, exam_ref,
-               syllabus_codes, reg_codes, tags)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+               syllabus_codes, reg_codes, tags, exam_session_id)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
         """, (item.question_type, item.question_subtype, item.tax_type, item.title,
               item.content, item.answer, item.marks, item.exam_ref,
-              item.syllabus_codes or [], item.reg_codes or [], item.tags))
+              item.syllabus_codes or [], item.reg_codes or [], item.tags,
+              item.exam_session_id))
         return {"id": cur.fetchone()[0]}
 
 
@@ -135,11 +144,12 @@ def update_sample_question(item_id: int, item: SampleQuestionUpdate):
             UPDATE sample_questions SET
                 question_type = %s, question_subtype = %s, tax_type = %s, title = %s,
                 content = %s, answer = %s, marks = %s, exam_ref = %s,
-                syllabus_codes = %s, reg_codes = %s, tags = %s
+                syllabus_codes = %s, reg_codes = %s, tags = %s, exam_session_id = %s
             WHERE id = %s
         """, (item.question_type, item.question_subtype, item.tax_type, item.title,
               item.content, item.answer, item.marks, item.exam_ref,
-              item.syllabus_codes or [], item.reg_codes or [], item.tags, item_id))
+              item.syllabus_codes or [], item.reg_codes or [], item.tags,
+              item.exam_session_id, item_id))
     return {"ok": True}
 
 

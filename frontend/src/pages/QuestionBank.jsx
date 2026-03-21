@@ -157,6 +157,11 @@ export default function QuestionBank() {
                   {q.reg_codes?.map((c) => (
                     <span key={c} className="px-1.5 py-0.5 bg-green-50 text-green-600 text-xs font-mono rounded border border-green-100">{c}</span>
                   ))}
+                  {q.exam_session_id && (
+                    <span className="px-2 py-0.5 bg-purple-50 text-purple-600 text-xs rounded border border-purple-100">
+                      {sessions.find((s) => s.id === q.exam_session_id)?.name || `Session ${q.exam_session_id}`}
+                    </span>
+                  )}
                 </div>
               </div>
               <button onClick={() => handleStar(q.id)} className="text-lg">

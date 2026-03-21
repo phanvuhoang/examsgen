@@ -25,11 +25,12 @@ function Modal({ title, children, onClose }) {
   )
 }
 
-function SampleForm({ initial, taxTypes, sessionId, onSave, onCancel }) {
+function SampleForm({ initial, taxTypes, sessions, sessionId, onSave, onCancel }) {
   const [form, setForm] = useState({
     question_type: 'MCQ', question_subtype: '', tax_type: 'CIT',
     title: '', content: '', answer: '', marks: '', exam_ref: '',
     syllabus_codes: [], reg_codes: [], tags: '',
+    exam_session_id: sessionId ? parseInt(sessionId) : null,
     ...initial,
   })
   const [saving, setSaving] = useState(false)
@@ -148,6 +149,16 @@ function SampleForm({ initial, taxTypes, sessionId, onSave, onCancel }) {
         <input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })}
           className="w-full border rounded px-3 py-1.5 text-sm" placeholder="salary, deductible, CIT" />
       </div>
+      <div>
+        <label className="text-xs font-medium block mb-1">Exam Session</label>
+        <select
+          value={form.exam_session_id || ''}
+          onChange={(e) => setForm({ ...form, exam_session_id: e.target.value ? parseInt(e.target.value) : null })}
+          className="w-full border rounded px-3 py-1.5 text-sm">
+          <option value="">— None (global) —</option>
+          {sessions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </div>
       <div className="flex gap-2 pt-2">
         <button onClick={handleSave} disabled={saving}
           className="px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 disabled:opacity-50">
@@ -213,11 +224,16 @@ export default function SampleQuestions() {
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [filters, setFilters] = useState({ question_type: '', tax_type: '', subtype: '', search: '' })
+  const [filters, setFilters] = useState({ question_type: '', tax_type: '', subtype: '', search: '', exam_session_id: '' })
   const [taxTypes, setTaxTypes] = useState(TAX_TYPES_DEFAULT)
+  const [sessions, setSessions] = useState([])
   const [showAdd, setShowAdd] = useState(false)
   const [editItem, setEditItem] = useState(null)
   const [viewItem, setViewItem] = useState(null)
+
+  useEffect(() => {
+    api.getSessions().then(setSessions).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!sessionId) return
@@ -234,6 +250,7 @@ export default function SampleQuestions() {
       if (filters.tax_type) params.tax_type = filters.tax_type
       if (filters.subtype) params.subtype = filters.subtype
       if (filters.search) params.search = filters.search
+      if (filters.exam_session_id) params.exam_session_id = filters.exam_session_id
       const data = await api.getSampleQuestions(params)
       setItems(data.items || [])
       setTotal(data.total || 0)
@@ -278,6 +295,11 @@ export default function SampleQuestions() {
 
       {/* Filters */}
       <div className="flex gap-3 mb-5 flex-wrap">
+        <select value={filters.exam_session_id} onChange={(e) => setFilters({ ...filters, exam_session_id: e.target.value })}
+          className="border rounded px-3 py-1.5 text-sm">
+          <option value="">All Sessions</option>
+          {sessions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
         <select value={filters.question_type} onChange={(e) => setFilters({ ...filters, question_type: e.target.value })}
           className="border rounded px-3 py-1.5 text-sm">
           <option value="">All Types</option>
@@ -322,7 +344,7 @@ export default function SampleQuestions() {
                   <p className="text-sm font-medium mb-1">{item.title || '(No title)'}</p>
                   <div className="text-xs text-gray-500 line-clamp-2"
                     dangerouslySetInnerHTML={{ __html: (item.content || '').replace(/<[^>]+>/g, ' ').substring(0, 200) }} />
-                  {((item.syllabus_codes || []).length > 0 || (item.reg_codes || []).length > 0) && (
+                  {((item.syllabus_codes || []).length > 0 || (item.reg_codes || []).length > 0 || item.exam_session_id) && (
                     <div className="flex gap-2 mt-1 flex-wrap">
                       {(item.syllabus_codes || []).map((c) => (
                         <span key={c} className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono">{c}</span>
@@ -330,6 +352,11 @@ export default function SampleQuestions() {
                       {(item.reg_codes || []).slice(0, 2).map((c) => (
                         <span key={c} className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-mono">{c}</span>
                       ))}
+                      {item.exam_session_id && (
+                        <span className="inline-flex items-center px-2 py-0.5 bg-purple-50 text-purple-600 text-xs rounded border border-purple-100">
+                          {sessions.find((s) => s.id === item.exam_session_id)?.name || `Session ${item.exam_session_id}`}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -352,14 +379,14 @@ export default function SampleQuestions() {
       {/* Add Modal */}
       {showAdd && (
         <Modal title="Add Sample Question" onClose={() => setShowAdd(false)}>
-          <SampleForm taxTypes={taxTypes} sessionId={sessionId} onSave={handleCreate} onCancel={() => setShowAdd(false)} />
+          <SampleForm taxTypes={taxTypes} sessions={sessions} sessionId={sessionId} onSave={handleCreate} onCancel={() => setShowAdd(false)} />
         </Modal>
       )}
 
       {/* Edit Modal */}
       {editItem && (
         <Modal title="Edit Sample Question" onClose={() => setEditItem(null)}>
-          <SampleForm initial={editItem} taxTypes={taxTypes} sessionId={sessionId} onSave={handleUpdate} onCancel={() => setEditItem(null)} />
+          <SampleForm initial={editItem} taxTypes={taxTypes} sessions={sessions} sessionId={sessionId} onSave={handleUpdate} onCancel={() => setEditItem(null)} />
         </Modal>
       )}
 

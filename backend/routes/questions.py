@@ -46,7 +46,7 @@ def list_questions(
         cur.execute(
             f"SELECT id, question_type, sac_thue, question_part, question_number, "
             f"content_json, model_used, provider_used, exam_session, created_at, is_starred, "
-            f"syllabus_codes, reg_codes "
+            f"syllabus_codes, reg_codes, session_id "
             f"FROM questions {where} ORDER BY created_at DESC LIMIT %s OFFSET %s",
             params + [limit, offset],
         )
@@ -72,6 +72,7 @@ def list_questions(
                 "is_starred": r[10],
                 "syllabus_codes": r[11] or [],
                 "reg_codes": r[12] or [],
+                "exam_session_id": r[13],
             }
             for r in rows
         ],

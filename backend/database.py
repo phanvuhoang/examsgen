@@ -233,6 +233,13 @@ def init_db():
               ON kb_regulation_parsed(session_id, reg_code);
         """)
 
+        # v2: session tagging for sample_questions
+        cur.execute("""
+            ALTER TABLE sample_questions ADD COLUMN IF NOT EXISTS exam_session_id INTEGER REFERENCES exam_sessions(id);
+            ALTER TABLE sample_questions ADD COLUMN IF NOT EXISTS syllabus_codes TEXT[];
+            ALTER TABLE sample_questions ADD COLUMN IF NOT EXISTS reg_codes TEXT[];
+        """)
+
         # v2: seed default settings for existing sessions
         cur.execute("""
             UPDATE exam_sessions SET
