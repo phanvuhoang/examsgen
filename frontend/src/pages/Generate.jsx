@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
-import KBMultiSelect from '../components/KBMultiSelect'
 import ReferenceMultiSelect from '../components/ReferenceMultiSelect'
 
 const SAC_THUE_OPTIONS = ['CIT', 'VAT', 'PIT', 'FCT', 'TP', 'ADMIN']
@@ -25,9 +24,6 @@ export default function Generate() {
   const [referenceId, setReferenceId] = useState('')
   const [customInstructions, setCustomInstructions] = useState('')
   const [referenceOptions, setReferenceOptions] = useState([])
-  const [kbSyllabusIds, setKbSyllabusIds] = useState([])
-  const [kbRegulationIds, setKbRegulationIds] = useState([])
-  const [kbSampleIds, setKbSampleIds] = useState([])
   // v2: Reference Materials
   const [mcqSubtype, setMcqSubtype] = useState('')
   const [selectedSyllabusCodes, setSelectedSyllabusCodes] = useState([])
@@ -83,9 +79,6 @@ export default function Generate() {
     setResult(null)
     try {
       const kbFields = {
-        kb_syllabus_ids: kbSyllabusIds.length ? kbSyllabusIds : null,
-        kb_regulation_ids: kbRegulationIds.length ? kbRegulationIds : null,
-        kb_sample_ids: kbSampleIds.length ? kbSampleIds : null,
         session_id: currentSession?.id || null,
         provider: provider || null,
         // v2 Reference Materials
@@ -358,41 +351,10 @@ export default function Generate() {
                   </p>
                 </div>
 
-                {/* KB Targeting (legacy) */}
+                {/* Reference Materials */}
                 <div className="border-t pt-4 mt-2">
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                    Knowledge Base Targeting (legacy)
-                  </p>
-                  <KBMultiSelect
-                    label="Syllabus items to test"
-                    endpoint={`/api/kb/syllabus?sac_thue=${sac_thue}${currentSession ? `&session_id=${currentSession.id}` : ''}`}
-                    value={kbSyllabusIds}
-                    onChange={setKbSyllabusIds}
-                    displayKey="section_title"
-                    hintKey="tags"
-                  />
-                  <KBMultiSelect
-                    label="Regulation paragraphs"
-                    endpoint={`/api/kb/regulations?sac_thue=${sac_thue}${currentSession ? `&session_id=${currentSession.id}` : ''}`}
-                    value={kbRegulationIds}
-                    onChange={setKbRegulationIds}
-                    displayKey="regulation_ref"
-                    hintKey="tags"
-                  />
-                  <KBMultiSelect
-                    label="Style references (sample questions)"
-                    endpoint={`/api/kb/samples?sac_thue=${sac_thue}&question_type=${type === 'mcq' ? 'MCQ' : type === 'scenario' ? 'SCENARIO_10' : 'LONGFORM_15'}${currentSession ? `&session_id=${currentSession.id}` : ''}`}
-                    value={kbSampleIds}
-                    onChange={setKbSampleIds}
-                    displayKey="title"
-                    hintKey="exam_tricks"
-                  />
-                </div>
-
-                {/* v2 Reference Materials */}
-                <div className="border-t pt-4 mt-2">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                    Reference Materials (v2)
+                    Reference Materials
                   </p>
 
                   {/* MCQ Subtype */}
