@@ -342,17 +342,22 @@ def bulk_insert_syllabus(data: dict):
     with get_db() as conn:
         cur = conn.cursor()
         for row in rows:
+            code = row.get('code') or row.get('syllabus_code', '')
+            topic = row.get('topics') or row.get('topic', '')
+            detail = row.get('detailed_syllabus', '')
+            # Upsert manually: update if exists, insert if not
             cur.execute("""
-                INSERT INTO kb_syllabus (session_id, tax_type, syllabus_code, topic, detailed_syllabus,
-                                        sac_thue, section_code, section_title, content)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (session_id, tax_type, syllabus_code) DO UPDATE
-                  SET topic = EXCLUDED.topic,
-                      detailed_syllabus = EXCLUDED.detailed_syllabus,
-                      section_title = EXCLUDED.detailed_syllabus,
-                      content = EXCLUDED.detailed_syllabus
-            """, (session_id, tax_type, row['code'], row['topics'], row['detailed_syllabus'],
-                  tax_type, row['code'], row['topics'], row['detailed_syllabus']))
+                UPDATE kb_syllabus
+                SET topic = %s, detailed_syllabus = %s, section_title = %s, content = %s
+                WHERE session_id = %s AND tax_type = %s AND syllabus_code = %s
+            """, (topic, detail, topic, detail, session_id, tax_type, code))
+            if cur.rowcount == 0:
+                cur.execute("""
+                    INSERT INTO kb_syllabus (session_id, tax_type, syllabus_code, topic, detailed_syllabus,
+                                            sac_thue, section_code, section_title, content)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (session_id, tax_type, code, topic, detail,
+                      tax_type, code, topic, detail))
     return {"inserted": len(rows)}
 
 
