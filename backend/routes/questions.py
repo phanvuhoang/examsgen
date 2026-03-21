@@ -14,6 +14,7 @@ def list_questions(
     starred: Optional[bool] = None,
     session_id: Optional[int] = None,
     user_id: Optional[int] = None,
+    syllabus_code: Optional[str] = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
 ):
@@ -34,6 +35,9 @@ def list_questions(
     if user_id:
         conditions.append("user_id = %s")
         params.append(user_id)
+    if syllabus_code:
+        conditions.append("syllabus_codes @> %s")
+        params.append([syllabus_code])
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
 
@@ -41,7 +45,8 @@ def list_questions(
         cur = conn.cursor()
         cur.execute(
             f"SELECT id, question_type, sac_thue, question_part, question_number, "
-            f"content_json, model_used, provider_used, exam_session, created_at, is_starred "
+            f"content_json, model_used, provider_used, exam_session, created_at, is_starred, "
+            f"syllabus_codes, reg_codes "
             f"FROM questions {where} ORDER BY created_at DESC LIMIT %s OFFSET %s",
             params + [limit, offset],
         )
@@ -65,6 +70,8 @@ def list_questions(
                 "exam_session": r[8],
                 "created_at": r[9].isoformat() if r[9] else None,
                 "is_starred": r[10],
+                "syllabus_codes": r[11] or [],
+                "reg_codes": r[12] or [],
             }
             for r in rows
         ],
@@ -208,6 +215,20 @@ def toggle_star(question_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="Question not found")
     return {"id": question_id, "is_starred": row[0]}
+
+
+@router.patch("/{question_id}/codes")
+def update_question_codes(question_id: int, data: dict):
+    """Update syllabus_codes and reg_codes for a question."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE questions SET syllabus_codes = %s, reg_codes = %s WHERE id = %s RETURNING id",
+            (data.get('syllabus_codes', []), data.get('reg_codes', []), question_id)
+        )
+        if not cur.fetchone():
+            raise HTTPException(404, "Question not found")
+    return {"ok": True}
 
 
 @router.delete("/{question_id}")

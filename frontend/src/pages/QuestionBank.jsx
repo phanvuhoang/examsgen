@@ -12,7 +12,7 @@ const SAC_THUE_OPTIONS = ['', 'CIT', 'VAT', 'PIT', 'FCT', 'TP', 'ADMIN']
 export default function QuestionBank() {
   const [questions, setQuestions] = useState([])
   const [total, setTotal] = useState(0)
-  const [filters, setFilters] = useState({ question_type: '', sac_thue: '', starred: '', session_id: '' })
+  const [filters, setFilters] = useState({ question_type: '', sac_thue: '', starred: '', session_id: '', syllabus_code: '' })
   const [selected, setSelected] = useState(new Set())
   const [viewing, setViewing] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -30,6 +30,7 @@ export default function QuestionBank() {
       if (filters.sac_thue) params.sac_thue = filters.sac_thue
       if (filters.starred === 'true') params.starred = true
       if (filters.session_id) params.session_id = filters.session_id
+      if (filters.syllabus_code) params.syllabus_code = filters.syllabus_code
       const data = await api.getQuestions(params)
       setQuestions(data.questions)
       setTotal(data.total)
@@ -114,6 +115,12 @@ export default function QuestionBank() {
           <option value="">All</option>
           <option value="true">Starred Only</option>
         </select>
+        <input
+          value={filters.syllabus_code}
+          onChange={(e) => setFilters({ ...filters, syllabus_code: e.target.value })}
+          placeholder="Syllabus code... e.g. B2a"
+          className="border rounded-lg px-3 py-2 text-sm w-40"
+        />
       </div>
 
       {/* Questions list */}
@@ -136,7 +143,7 @@ export default function QuestionBank() {
                 className="rounded"
               />
               <div className="flex-1 cursor-pointer" onClick={() => viewQuestion(q.id)}>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
                     q.question_type === 'MCQ' ? 'bg-blue-100 text-blue-700' :
                     q.question_type === 'SCENARIO_10' ? 'bg-purple-100 text-purple-700' :
@@ -144,6 +151,12 @@ export default function QuestionBank() {
                   }`}>{q.question_number || q.question_type}</span>
                   <span className="text-sm font-medium">{q.sac_thue}</span>
                   <span className="text-xs text-gray-400">{q.exam_session}</span>
+                  {q.syllabus_codes?.map((c) => (
+                    <span key={c} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-xs font-mono rounded border border-blue-100">{c}</span>
+                  ))}
+                  {q.reg_codes?.map((c) => (
+                    <span key={c} className="px-1.5 py-0.5 bg-green-50 text-green-600 text-xs font-mono rounded border border-green-100">{c}</span>
+                  ))}
                 </div>
               </div>
               <button onClick={() => handleStar(q.id)} className="text-lg">

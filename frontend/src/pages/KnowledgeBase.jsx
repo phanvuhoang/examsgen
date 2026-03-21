@@ -26,6 +26,12 @@ function Toast({ message, onClose }) {
   )
 }
 
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+  </svg>
+)
+
 // ── SYLLABUS TAB ───────────────────────────────────────────────────────────────
 
 function SyllabusTab({ sessionId, taxTypes }) {
@@ -39,6 +45,7 @@ function SyllabusTab({ sessionId, taxTypes }) {
   const [preview, setPreview] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [toast, setToast] = useState('')
+  const [selectedIds, setSelectedIds] = useState(new Set())
 
   const fetchItems = async () => {
     if (!sessionId) return
@@ -48,11 +55,24 @@ function SyllabusTab({ sessionId, taxTypes }) {
       if (taxType) params.tax_type = taxType
       const data = await api.getKBSyllabus(params)
       setItems(data.filter((d) => d.syllabus_code))
+      setSelectedIds(new Set())
     } catch { setItems([]) }
     finally { setLoading(false) }
   }
 
   useEffect(() => { fetchItems() }, [sessionId, taxType])
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
+  }
+  const toggleSelectAll = () => {
+    setSelectedIds(selectedIds.size === items.length ? new Set() : new Set(items.map((i) => i.id)))
+  }
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedIds.size} items? This cannot be undone.`)) return
+    await api.bulkDeleteKBItems('syllabus', [...selectedIds])
+    fetchItems()
+  }
 
   const handleUploadPreview = async () => {
     if (!uploadFile || !taxType || !sessionId) { alert('Select tax type and file first'); return }
@@ -72,7 +92,7 @@ function SyllabusTab({ sessionId, taxTypes }) {
     if (!preview) return
     setUploading(true)
     try {
-      await api.bulkInsertKBSyllabus({ session_id: parseInt(sessionId), tax_type: taxType, rows: preview.rows })
+      await api.bulkInsertKBSyllabus({ session_id: parseInt(sessionId), tax_type: taxType, rows: preview.rows, replace: true })
       setShowUpload(false)
       setPreview(null)
       setUploadFile(null)
@@ -116,6 +136,9 @@ function SyllabusTab({ sessionId, taxTypes }) {
     } catch (err) { alert('Failed: ' + err.message) }
   }
 
+  const allSelected = items.length > 0 && selectedIds.size === items.length
+  const someSelected = selectedIds.size > 0 && selectedIds.size < items.length
+
   return (
     <div>
       {toast && <Toast message={toast} onClose={() => setToast('')} />}
@@ -135,6 +158,18 @@ function SyllabusTab({ sessionId, taxTypes }) {
         </button>
         <span className="text-xs text-gray-500 ml-auto">{items.length} items</span>
       </div>
+
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="sticky top-0 z-10 mb-3 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 shadow-sm">
+          <span className="text-sm text-amber-700 font-medium">✓ {selectedIds.size} items selected</span>
+          <button onClick={handleBulkDelete}
+            className="flex items-center gap-1 px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+            <TrashIcon /> Delete selected
+          </button>
+          <button onClick={() => setSelectedIds(new Set())} className="text-xs text-gray-500 hover:text-gray-700">✕ Clear</button>
+        </div>
+      )}
 
       {/* Upload Modal */}
       {showUpload && (
@@ -180,6 +215,9 @@ function SyllabusTab({ sessionId, taxTypes }) {
                       ))}</tbody>
                     </table>
                   </div>
+                  <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                    ⚠️ This will replace existing syllabus items for {taxType}.
+                  </div>
                   <button onClick={handleConfirmImport} disabled={uploading}
                     className="mt-3 px-4 py-2 bg-green-600 text-white text-sm rounded-lg disabled:opacity-50">
                     {uploading ? 'Importing...' : `Confirm Import (${preview.total} items)`}
@@ -199,6 +237,10 @@ function SyllabusTab({ sessionId, taxTypes }) {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs">
               <tr>
+                <th className="px-2 py-2 w-8">
+                  <input type="checkbox" checked={allSelected} ref={(el) => { if (el) el.indeterminate = someSelected }}
+                    onChange={toggleSelectAll} className="rounded" />
+                </th>
                 <th className="px-3 py-2 text-left w-20">Code</th>
                 <th className="px-3 py-2 text-left w-40">Topics</th>
                 <th className="px-3 py-2 text-left">Detailed Syllabus</th>
@@ -209,6 +251,7 @@ function SyllabusTab({ sessionId, taxTypes }) {
               {items.map((item) => (
                 editId === item.id ? (
                   <tr key={item.id} className="bg-blue-50">
+                    <td className="px-2 py-1" />
                     <td className="px-2 py-1"><input value={editRow.syllabus_code || ''} onChange={(e) => setEditRow({ ...editRow, syllabus_code: e.target.value })} className="w-full border rounded px-1 py-0.5 text-xs" /></td>
                     <td className="px-2 py-1"><input value={editRow.topic || ''} onChange={(e) => setEditRow({ ...editRow, topic: e.target.value })} className="w-full border rounded px-1 py-0.5 text-xs" /></td>
                     <td className="px-2 py-1"><textarea value={editRow.detailed_syllabus || ''} onChange={(e) => setEditRow({ ...editRow, detailed_syllabus: e.target.value })} rows={2} className="w-full border rounded px-1 py-0.5 text-xs" /></td>
@@ -218,18 +261,21 @@ function SyllabusTab({ sessionId, taxTypes }) {
                     </td>
                   </tr>
                 ) : (
-                  <tr key={item.id} className="hover:bg-gray-50">
+                  <tr key={item.id} className={`hover:bg-gray-50 ${selectedIds.has(item.id) ? 'bg-blue-50' : ''}`}>
+                    <td className="px-2 py-2 text-center">
+                      <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="rounded" />
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs">{item.syllabus_code || item.section_code}</td>
                     <td className="px-3 py-2 text-xs text-gray-600">{item.topic || item.section_title}</td>
                     <td className="px-3 py-2 text-xs">{(item.detailed_syllabus || item.content || '').substring(0, 120)}{(item.detailed_syllabus || item.content || '').length > 120 ? '...' : ''}</td>
-                    <td className="px-3 py-2">
-                      <button onClick={() => { setEditId(item.id); setEditRow({ syllabus_code: item.syllabus_code || item.section_code, topic: item.topic || item.section_title, detailed_syllabus: item.detailed_syllabus || item.content, ...item }) }} className="text-xs text-brand-600 mr-2">Edit</button>
-                      <button onClick={() => handleDelete(item.id)} className="text-xs text-red-500">✕</button>
+                    <td className="px-3 py-2 flex items-center gap-2">
+                      <button onClick={() => { setEditId(item.id); setEditRow({ syllabus_code: item.syllabus_code || item.section_code, topic: item.topic || item.section_title, detailed_syllabus: item.detailed_syllabus || item.content, ...item }) }} className="text-xs text-brand-600">Edit</button>
+                      <button onClick={() => handleDelete(item.id)} className="text-red-400 hover:text-red-600 transition-colors" title="Delete"><TrashIcon /></button>
                     </td>
                   </tr>
                 )
               ))}
-              {items.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-gray-400 text-sm">No syllabus items. Upload a CSV/Excel file to get started.</td></tr>}
+              {items.length === 0 && <tr><td colSpan={5} className="text-center py-6 text-gray-400 text-sm">No syllabus items. Upload a CSV/Excel file to get started.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -244,18 +290,31 @@ function RegulationsTab({ sessionId, taxTypes }) {
   const [taxType, setTaxType] = useState('')
   const [files, setFiles] = useState([])
   const [parsedRows, setParsedRows] = useState([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [parsing, setParsing] = useState(null)
+  const [parseStatus, setParseStatus] = useState({}) // fileId -> {jobId, status, parsed, total_chunks, chunk}
   const [editItem, setEditItem] = useState(null)
-  const [search, setSearch] = useState('')
   const [toast, setToast] = useState('')
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  // Filters
+  const [regFileFilter, setRegFileFilter] = useState('')
+  const [syllabusFilter, setSyllabusFilter] = useState('')
+  const [articleFilter, setArticleFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [regFiles, setRegFiles] = useState([])
 
   const fetchFiles = async () => {
     if (!sessionId) return
+    try { setFiles(await api.getSessionFiles(sessionId, 'regulation')) } catch { setFiles([]) }
+  }
+
+  const fetchRegFiles = async () => {
+    if (!sessionId) return
     try {
-      const data = await api.getSessionFiles(sessionId, 'regulation')
-      setFiles(data)
-    } catch { setFiles([]) }
+      const params = { session_id: sessionId }
+      if (taxType) params.tax_type = taxType
+      setRegFiles(await api.getRegulationFiles(params))
+    } catch { setRegFiles([]) }
   }
 
   const fetchParsed = async () => {
@@ -264,13 +323,33 @@ function RegulationsTab({ sessionId, taxTypes }) {
     try {
       const params = { session_id: sessionId }
       if (taxType) params.tax_type = taxType
-      const data = await api.getParsedRegulations(params)
-      setParsedRows(data)
-    } catch { setParsedRows([]) }
+      if (regFileFilter) params.source_file = regFileFilter
+      if (syllabusFilter) params.syllabus_code = syllabusFilter
+      if (articleFilter) params.article_no = articleFilter
+      if (search) params.search = search
+      const data = await api.getRegulationsParsed(params)
+      setParsedRows(data.items || [])
+      setTotal(data.total || 0)
+      setSelectedIds(new Set())
+    } catch { setParsedRows([]); setTotal(0) }
     finally { setLoading(false) }
   }
 
-  useEffect(() => { fetchFiles(); fetchParsed() }, [sessionId, taxType])
+  useEffect(() => { fetchFiles(); fetchRegFiles() }, [sessionId, taxType])
+  useEffect(() => { fetchParsed() }, [sessionId, taxType, regFileFilter, syllabusFilter, articleFilter, search])
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
+  }
+  const toggleSelectAll = () => {
+    setSelectedIds(selectedIds.size === parsedRows.length ? new Set() : new Set(parsedRows.map((i) => i.id)))
+  }
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedIds.size} items? This cannot be undone.`)) return
+    await api.bulkDeleteKBItems('regulation-parsed', [...selectedIds])
+    fetchParsed()
+    fetchRegFiles()
+  }
 
   const handleUploadFile = async (e) => {
     const file = e.target.files[0]
@@ -290,18 +369,30 @@ function RegulationsTab({ sessionId, taxTypes }) {
   const handleParse = async (file) => {
     const docRef = prompt('Enter document reference (e.g. "Decree 320/2025/ND-CP"):', file.file_name.replace(/\.(docx?|pdf)$/i, ''))
     if (docRef === null) return
-    setParsing(file.id)
     try {
-      const res = await api.parseRegulationDoc({
+      const { job_id } = await api.parseRegulationDocAsync({
         session_id: parseInt(sessionId),
         tax_type: taxType || file.sac_thue,
         file_path: file.file_path,
         doc_ref: docRef,
       })
-      setToast(`Parsed ${res.parsed} paragraphs`)
-      fetchParsed()
+      setParseStatus((p) => ({ ...p, [file.id]: { jobId: job_id, status: 'running', parsed: 0, total_chunks: 0, chunk: 0 } }))
+
+      const poll = setInterval(async () => {
+        try {
+          const job = await api.getParseJob(job_id)
+          setParseStatus((p) => ({ ...p, [file.id]: { jobId: job_id, ...job } }))
+          if (job.status === 'done' || job.status === 'failed') {
+            clearInterval(poll)
+            if (job.status === 'done') {
+              setToast(`Parsed ${job.parsed} paragraphs`)
+              fetchParsed()
+              fetchRegFiles()
+            }
+          }
+        } catch { clearInterval(poll) }
+      }, 2000)
     } catch (err) { alert('Parse failed: ' + err.message) }
-    finally { setParsing(null) }
   }
 
   const handleDeleteFile = async (fileId) => {
@@ -326,15 +417,14 @@ function RegulationsTab({ sessionId, taxTypes }) {
     try { await api.deleteParsedRegulation(id); fetchParsed() } catch { }
   }
 
-  const filteredRows = search
-    ? parsedRows.filter((r) => r.reg_code?.includes(search) || r.paragraph_text?.toLowerCase().includes(search.toLowerCase()))
-    : parsedRows
+  const allSelected = parsedRows.length > 0 && selectedIds.size === parsedRows.length
+  const someSelected = selectedIds.size > 0 && selectedIds.size < parsedRows.length
 
   return (
     <div>
       {toast && <Toast message={toast} onClose={() => setToast('')} />}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <select value={taxType} onChange={(e) => setTaxType(e.target.value)}
+        <select value={taxType} onChange={(e) => { setTaxType(e.target.value); setRegFileFilter(''); setSyllabusFilter('') }}
           className="border rounded px-3 py-1.5 text-sm">
           <option value="">All Tax Types</option>
           {taxTypes.map((t) => <option key={t.code} value={t.code}>{t.code} — {t.name}</option>)}
@@ -349,55 +439,121 @@ function RegulationsTab({ sessionId, taxTypes }) {
       {files.length > 0 && (
         <div className="mb-4 border rounded-lg p-3 space-y-2">
           <p className="text-xs font-medium text-gray-600 mb-1">Uploaded Files:</p>
-          {files.map((f) => (
-            <div key={f.id} className="flex items-center gap-3 text-sm">
-              <span className="text-lg">📄</span>
-              <span className="flex-1 text-xs">{f.file_name}</span>
-              <span className="text-xs text-gray-400">{f.sac_thue}</span>
-              <button onClick={() => handleParse(f)} disabled={parsing === f.id}
-                className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50">
-                {parsing === f.id ? 'Parsing...' : 'Parse'}
-              </button>
-              <button onClick={() => handleDeleteFile(f.id)} className="text-xs text-red-500">✕</button>
-            </div>
-          ))}
+          {files.map((f) => {
+            const ps = parseStatus[f.id]
+            return (
+              <div key={f.id} className="flex items-center gap-3 text-sm flex-wrap">
+                <span className="text-lg">📄</span>
+                <span className="flex-1 text-xs">{f.file_name}</span>
+                <span className="text-xs text-gray-400">{f.sac_thue}</span>
+                {ps && ps.status === 'running' && (
+                  <span className="text-xs text-blue-600 animate-pulse">
+                    Parsing... {ps.parsed} ¶ (chunk {ps.chunk}/{ps.total_chunks})
+                  </span>
+                )}
+                {ps && ps.status === 'done' && (
+                  <span className="text-xs text-green-600">✓ {ps.parsed} paragraphs parsed</span>
+                )}
+                {ps && ps.status === 'failed' && (
+                  <span className="text-xs text-red-500">✗ Parse failed</span>
+                )}
+                <button onClick={() => handleParse(f)} disabled={ps?.status === 'running'}
+                  className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50">
+                  {ps?.status === 'running' ? 'Parsing...' : (ps?.status === 'done' ? 'Re-parse' : 'Parse')}
+                </button>
+                <button onClick={() => handleDeleteFile(f.id)} className="text-xs text-red-500">✕</button>
+              </div>
+            )
+          })}
         </div>
       )}
 
-      {/* Parsed paragraphs */}
-      <div className="flex items-center gap-3 mb-3">
-        <span className="text-sm font-medium">Parsed Paragraphs ({parsedRows.length})</span>
+      {/* Filter bar */}
+      <div className="flex flex-wrap gap-2 mb-3 items-center">
+        <select value={regFileFilter} onChange={(e) => setRegFileFilter(e.target.value)}
+          className="border rounded px-3 py-1.5 text-sm min-w-[180px]">
+          <option value="">All Regulation Files</option>
+          {regFiles.map((f) => (
+            <option key={f.source_file} value={f.source_file}>
+              {f.doc_ref || f.source_file?.split('/').pop()} ({f.paragraph_count} ¶)
+            </option>
+          ))}
+        </select>
+        <div className="relative">
+          <input value={syllabusFilter} onChange={(e) => setSyllabusFilter(e.target.value)}
+            placeholder="Syllabus code..." className="border rounded px-3 py-1.5 text-sm w-40" />
+          {syllabusFilter && (
+            <button onClick={() => setSyllabusFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">✕</button>
+          )}
+        </div>
+        <input value={articleFilter} onChange={(e) => setArticleFilter(e.target.value)}
+          placeholder="Article... e.g. 9" className="border rounded px-3 py-1.5 text-sm w-32" />
         <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search..." className="border rounded px-3 py-1 text-sm flex-1 max-w-xs" />
+          placeholder="Search text..." className="border rounded px-3 py-1.5 text-sm flex-1 min-w-[140px]" />
+        {(regFileFilter || syllabusFilter || articleFilter || search) && (
+          <button onClick={() => { setRegFileFilter(''); setSyllabusFilter(''); setArticleFilter(''); setSearch('') }}
+            className="text-xs text-gray-500 hover:text-gray-700 underline">Clear filters</button>
+        )}
+        <span className="text-xs text-gray-400 ml-auto">{total} paragraphs</span>
       </div>
+
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="sticky top-0 z-10 mb-3 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 shadow-sm">
+          <span className="text-sm text-amber-700 font-medium">✓ {selectedIds.size} items selected</span>
+          <button onClick={handleBulkDelete}
+            className="flex items-center gap-1 px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+            <TrashIcon /> Delete selected
+          </button>
+          <button onClick={() => setSelectedIds(new Set())} className="text-xs text-gray-500 hover:text-gray-700">✕ Clear</button>
+        </div>
+      )}
 
       {loading ? <div className="text-center py-6 text-gray-400">Loading...</div> : (
         <div className="overflow-x-auto border rounded-lg">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs">
               <tr>
+                <th className="px-2 py-2 w-8">
+                  <input type="checkbox" checked={allSelected} ref={(el) => { if (el) el.indeterminate = someSelected }}
+                    onChange={toggleSelectAll} className="rounded" />
+                </th>
                 <th className="px-3 py-2 text-left w-36">RegCode</th>
                 <th className="px-3 py-2 text-left w-24">Article</th>
                 <th className="px-3 py-2 text-left">Paragraph Text</th>
-                <th className="px-3 py-2 text-left w-28">Syllabus Codes</th>
+                <th className="px-3 py-2 text-left w-32">Syllabus Codes</th>
                 <th className="px-3 py-2 text-left w-20">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {filteredRows.map((row) => (
-                <tr key={row.id} className="hover:bg-gray-50">
+              {parsedRows.map((row) => (
+                <tr key={row.id} className={`hover:bg-gray-50 ${selectedIds.has(row.id) ? 'bg-blue-50' : ''}`}>
+                  <td className="px-2 py-2 text-center">
+                    <input type="checkbox" checked={selectedIds.has(row.id)} onChange={() => toggleSelect(row.id)} className="rounded" />
+                  </td>
                   <td className="px-3 py-2 font-mono text-xs">{row.reg_code}</td>
                   <td className="px-3 py-2 text-xs">{row.article_no}</td>
-                  <td className="px-3 py-2 text-xs">{row.paragraph_text?.substring(0, 150)}...</td>
-                  <td className="px-3 py-2 text-xs">{(row.syllabus_codes || []).join(', ')}</td>
+                  <td className="px-3 py-2 text-xs">{row.paragraph_text?.substring(0, 150)}{row.paragraph_text?.length > 150 ? '...' : ''}</td>
                   <td className="px-3 py-2">
-                    <button onClick={() => setEditItem({ ...row })} className="text-xs text-brand-600 mr-2">Edit</button>
-                    <button onClick={() => handleDeleteParsed(row.id)} className="text-xs text-red-500">✕</button>
+                    <div className="flex flex-wrap gap-1">
+                      {(row.syllabus_codes || []).map((code) => (
+                        <button key={code} onClick={() => setSyllabusFilter(code)}
+                          className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-xs font-mono rounded border border-blue-100 hover:bg-blue-100 cursor-pointer"
+                          title="Click to filter by this syllabus code">
+                          {code}
+                        </button>
+                      ))}
+                      {(!row.syllabus_codes || row.syllabus_codes.length === 0) && <span className="text-gray-300 text-xs">—</span>}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 flex items-center gap-2">
+                    <button onClick={() => setEditItem({ ...row })} className="text-xs text-brand-600">Edit</button>
+                    <button onClick={() => handleDeleteParsed(row.id)} className="text-red-400 hover:text-red-600 transition-colors" title="Delete"><TrashIcon /></button>
                   </td>
                 </tr>
               ))}
-              {filteredRows.length === 0 && (
-                <tr><td colSpan={5} className="text-center py-6 text-gray-400 text-sm">No parsed paragraphs. Upload and parse a regulation file.</td></tr>
+              {parsedRows.length === 0 && (
+                <tr><td colSpan={6} className="text-center py-6 text-gray-400 text-sm">No parsed paragraphs. Upload and parse a regulation file.</td></tr>
               )}
             </tbody>
           </table>

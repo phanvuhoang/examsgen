@@ -247,4 +247,48 @@ export const api = {
     const q = new URLSearchParams(params)
     return request(`/questions/search?${q}`)
   },
+
+  // v2: Auto-suggest syllabus + reg codes for a question
+  suggestCodes: async (data) => {
+    try {
+      return await request('/kb/suggest-codes', { method: 'POST', body: JSON.stringify(data) })
+    } catch {
+      return { syllabus_codes: [], reg_codes: [] }
+    }
+  },
+
+  // v2: Save codes back to a generated question
+  updateQuestionCodes: (questionId, data) =>
+    request(`/questions/${questionId}/codes`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // v2: Save codes to a sample question
+  updateSampleQuestionCodes: (itemId, data) =>
+    request(`/sample-questions/${itemId}/codes`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // v2: Bulk delete KB items
+  bulkDeleteKBItems: async (type, ids) => {
+    try {
+      return await request(`/kb/${type}/bulk`, { method: 'DELETE', body: JSON.stringify({ ids }) })
+    } catch {
+      return { deleted: 0 }
+    }
+  },
+
+  // v2: Get regulation files with paragraph counts
+  getRegulationFiles: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/kb/regulations/files?${q}`)
+  },
+
+  // v2: Async parse job
+  parseRegulationDocAsync: (data) =>
+    request('/kb/regulations/parse-doc-async', { method: 'POST', body: JSON.stringify(data) }),
+
+  getParseJob: (jobId) => request(`/kb/regulations/parse-job/${jobId}`),
+
+  // v2: updated getParsedRegulations returns {total, items}
+  getRegulationsParsed: (params = {}) => {
+    const q = new URLSearchParams(params)
+    return request(`/kb/regulations/parsed?${q}`)
+  },
 }

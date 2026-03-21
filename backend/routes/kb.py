@@ -1,12 +1,12 @@
 import re
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks, Query
 from pydantic import BaseModel
 from typing import Optional, List
 import json
 import logging
 
 from backend.database import get_db
-from backend.ai_provider import call_ai, parse_ai_json_list
+from backend.ai_provider import call_ai, parse_ai_json_list, parse_ai_json
 
 router = APIRouter(prefix="/api/kb", tags=["kb"])
 logger = logging.getLogger(__name__)
@@ -343,18 +343,25 @@ async def upload_syllabus(
 
 @router.post("/syllabus/bulk-insert")
 def bulk_insert_syllabus(data: dict):
-    """Confirm and insert parsed syllabus rows. Upserts on (session_id, tax_type, syllabus_code)."""
+    """Confirm and insert parsed syllabus rows. Optionally clears existing before insert."""
     session_id = data['session_id']
     tax_type = data['tax_type']
     rows = data['rows']
+    replace = data.get('replace', True)  # default: replace existing for this session+tax_type
 
     with get_db() as conn:
         cur = conn.cursor()
+        cleared = 0
+        if replace:
+            cur.execute(
+                "DELETE FROM kb_syllabus WHERE session_id = %s AND COALESCE(tax_type, sac_thue) = %s",
+                (session_id, tax_type)
+            )
+            cleared = cur.rowcount
         for row in rows:
             code = row.get('code') or row.get('syllabus_code', '')
             topic = row.get('topics') or row.get('topic', '')
             detail = row.get('detailed_syllabus', '')
-            # Upsert manually: update if exists, insert if not
             cur.execute("""
                 UPDATE kb_syllabus
                 SET topic = %s, detailed_syllabus = %s, section_title = %s, content = %s
@@ -367,7 +374,7 @@ def bulk_insert_syllabus(data: dict):
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (session_id, tax_type, code, topic, detail,
                       tax_type, code, topic, detail))
-    return {"inserted": len(rows)}
+    return {"inserted": len(rows), "cleared": cleared}
 
 
 @router.get("/syllabus/search")
@@ -398,9 +405,169 @@ def search_syllabus(session_id: Optional[int] = None, tax_type: Optional[str] = 
 # v2: REGULATIONS PARSED — AI Parse + CRUD + Search
 # ============================================================
 
+def _split_into_article_chunks(text: str, max_chars: int = 8000) -> list:
+    """Split regulation text into chunks at article boundaries."""
+    import re as _re
+    article_pattern = _re.compile(
+        r'(?:^|\n)\s*(?:Article|Điều|ARTICLE|ĐIỀU)\s+\d+',
+        _re.MULTILINE | _re.IGNORECASE
+    )
+    matches = list(article_pattern.finditer(text))
+
+    if not matches:
+        chunks = []
+        step = max_chars - 500
+        for i in range(0, len(text), step):
+            chunks.append(text[i:i + max_chars])
+            if i + max_chars >= len(text):
+                break
+        return chunks
+
+    chunks = []
+    current_chunk_start = 0
+    current_chunk_articles = []
+
+    for i, match in enumerate(matches):
+        article_start = match.start()
+        article_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        article_text = text[article_start:article_end]
+
+        if len(article_text) > max_chars:
+            if current_chunk_articles:
+                chunks.append(text[current_chunk_start:article_start])
+                current_chunk_articles = []
+                current_chunk_start = article_start
+            for j in range(0, len(article_text), max_chars - 200):
+                chunks.append(article_text[j:j + max_chars])
+            current_chunk_start = article_end
+            continue
+
+        current_size = article_start - current_chunk_start
+        if current_chunk_articles and current_size + len(article_text) > max_chars:
+            chunks.append(text[current_chunk_start:article_start])
+            current_chunk_start = article_start
+            current_chunk_articles = []
+
+        current_chunk_articles.append(match.group())
+
+    if current_chunk_start < len(text):
+        chunks.append(text[current_chunk_start:])
+
+    return [c for c in chunks if c.strip()]
+
+
+# In-memory job store for async parse jobs
+_parse_jobs: dict = {}
+
+
+def _run_parse_job(job_id: str, data: dict):
+    """Background task — runs the chunked parse and updates job status."""
+    import os
+    from backend.context_builder import extract_text_from_file
+    from backend.config import DATA_DIR
+    try:
+        session_id = data['session_id']
+        tax_type = data['tax_type']
+        file_path = data['file_path']
+        doc_ref = data.get('doc_ref', '')
+
+        full_path = os.path.join(DATA_DIR, file_path) if not file_path.startswith('/') else file_path
+        if not os.path.exists(full_path):
+            _parse_jobs[job_id]['status'] = 'failed'
+            _parse_jobs[job_id]['error'] = f'File not found: {file_path}'
+            return
+
+        text = extract_text_from_file(full_path)
+
+        # Load syllabus context
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT COALESCE(syllabus_code, section_code) as code,
+                       COALESCE(topic, section_title) as topic,
+                       COALESCE(detailed_syllabus, content) as detail
+                FROM kb_syllabus
+                WHERE session_id = %s AND COALESCE(tax_type, sac_thue) = %s
+                  AND COALESCE(syllabus_code, section_code) IS NOT NULL
+                ORDER BY COALESCE(syllabus_code, section_code)
+            """, (session_id, tax_type))
+            syllabus_rows = cur.fetchall()
+
+        syllabus_context = ''
+        if syllabus_rows:
+            syllabus_list = '\n'.join(f'- [{r[0]}] {r[1]}: {r[2][:80]}' for r in syllabus_rows[:80])
+            syllabus_context = f'\n\nAVAILABLE SYLLABUS CODES (match paragraphs to these if relevant):\n{syllabus_list}'
+
+        text_chunks = _split_into_article_chunks(text, max_chars=8000)
+        _parse_jobs[job_id]['total_chunks'] = len(text_chunks)
+        doc_slug = re.sub(r'[^A-Za-z0-9]', '', doc_ref.replace('/', '-').replace(' ', ''))[:20]
+        all_rows = []
+
+        for chunk_idx, chunk_text in enumerate(text_chunks):
+            _parse_jobs[job_id]['chunk'] = chunk_idx + 1
+            prompt = f"""Parse this Vietnamese tax regulation document chunk into individual paragraphs.
+
+For each paragraph extract:
+- article_no: article number if present (e.g. "Article 12" or "Điều 12")
+- paragraph_no: sequential number within that article (1, 2, 3...)
+- paragraph_text: the complete text of this paragraph (keep original wording)
+- tags: 3-6 English keywords
+- syllabus_codes: array of matching syllabus codes from the list below (empty array [] if none match){syllabus_context}
+
+Return ONLY valid JSON array, no markdown:
+[
+  {{
+    "article_no": "Article 9",
+    "paragraph_no": 1,
+    "paragraph_text": "...",
+    "tags": "deductible,expenses,conditions",
+    "syllabus_codes": ["B2a", "B2b"]
+  }}
+]
+
+DOCUMENT TYPE: regulation | TAX TYPE: {tax_type} | SOURCE: {doc_ref} | CHUNK {chunk_idx + 1}/{len(text_chunks)}
+
+DOCUMENT CHUNK:
+{chunk_text}"""
+
+            result = call_ai(prompt, model_tier='fast')
+            chunks_parsed = parse_ai_json_list(result['content'])
+
+            with get_db() as conn:
+                cur = conn.cursor()
+                for item in chunks_parsed:
+                    art = re.sub(r'[^0-9]', '', str(item.get('article_no', '0')))
+                    p = item.get('paragraph_no', 0)
+                    reg_code = f'{tax_type}-{doc_slug}-Art{art}-P{p}'
+                    syllabus_codes = item.get('syllabus_codes', [])
+                    if isinstance(syllabus_codes, str):
+                        syllabus_codes = [s.strip() for s in syllabus_codes.split(',') if s.strip()]
+                    cur.execute("""
+                        INSERT INTO kb_regulation_parsed
+                          (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
+                           paragraph_text, syllabus_codes, tags, source_file)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT DO NOTHING
+                    """, (session_id, tax_type, reg_code, doc_ref,
+                          item.get('article_no'), p,
+                          item.get('paragraph_text', ''),
+                          syllabus_codes,
+                          item.get('tags', ''),
+                          file_path))
+                    all_rows.append({'reg_code': reg_code, 'syllabus_codes': syllabus_codes})
+
+            _parse_jobs[job_id]['parsed'] = len(all_rows)
+
+        _parse_jobs[job_id]['status'] = 'done'
+        _parse_jobs[job_id]['rows'] = all_rows
+    except Exception as e:
+        _parse_jobs[job_id]['status'] = 'failed'
+        _parse_jobs[job_id]['error'] = str(e)
+
+
 @router.post("/regulations/parse-doc")
 def parse_regulation_doc(data: dict):
-    """AI-parse a regulation document into kb_regulation_parsed rows."""
+    """AI-parse a regulation document into kb_regulation_parsed rows (chunked, clears first)."""
     import os
     from backend.context_builder import extract_text_from_file
     from backend.config import DATA_DIR
@@ -410,65 +577,168 @@ def parse_regulation_doc(data: dict):
     file_path = data['file_path']
     doc_ref = data.get('doc_ref', '')
 
+    # Clear existing rows for this file (smart re-parse)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM kb_regulation_parsed WHERE session_id = %s AND source_file = %s",
+            (session_id, file_path)
+        )
+        cleared = cur.rowcount
+
     full_path = os.path.join(DATA_DIR, file_path) if not file_path.startswith('/') else file_path
     if not os.path.exists(full_path):
         raise HTTPException(404, f"File not found: {file_path}")
 
-    text = extract_text_from_file(full_path)[:20000]
+    text = extract_text_from_file(full_path)
+    if not text or len(text) < 100:
+        raise HTTPException(400, "Could not extract text from file")
 
-    prompt = f"""Parse this Vietnamese tax regulation document into individual paragraphs.
+    # Load syllabus context
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COALESCE(syllabus_code, section_code) as code,
+                   COALESCE(topic, section_title) as topic,
+                   COALESCE(detailed_syllabus, content) as detail
+            FROM kb_syllabus
+            WHERE session_id = %s AND COALESCE(tax_type, sac_thue) = %s
+              AND COALESCE(syllabus_code, section_code) IS NOT NULL
+            ORDER BY COALESCE(syllabus_code, section_code)
+        """, (session_id, tax_type))
+        syllabus_rows = cur.fetchall()
 
-For each paragraph, extract:
-- article_no: article number (e.g. "Article 12" or "Điều 12")
+    syllabus_context = ''
+    if syllabus_rows:
+        syllabus_list = '\n'.join(f'- [{r[0]}] {r[1]}: {r[2][:80]}' for r in syllabus_rows[:80])
+        syllabus_context = f'\n\nAVAILABLE SYLLABUS CODES (match paragraphs to these if relevant):\n{syllabus_list}'
+
+    text_chunks = _split_into_article_chunks(text, max_chars=8000)
+    doc_slug = re.sub(r'[^A-Za-z0-9]', '', doc_ref.replace('/', '-').replace(' ', ''))[:20]
+    all_rows = []
+
+    for chunk_idx, chunk_text in enumerate(text_chunks):
+        prompt = f"""Parse this Vietnamese tax regulation document chunk into individual paragraphs.
+
+For each paragraph extract:
+- article_no: article number if present (e.g. "Article 12" or "Điều 12")
 - paragraph_no: sequential number within that article (1, 2, 3...)
-- paragraph_text: the complete text of this paragraph
-- tags: 3-6 English keywords describing this paragraph's topic
+- paragraph_text: the complete text of this paragraph (keep original wording)
+- tags: 3-6 English keywords
+- syllabus_codes: array of matching syllabus codes from the list below (empty array [] if none match){syllabus_context}
 
-Return ONLY a valid JSON array:
+Return ONLY valid JSON array, no markdown:
 [
   {{
-    "article_no": "Article 12",
+    "article_no": "Article 9",
     "paragraph_no": 1,
     "paragraph_text": "...",
-    "tags": "deductible,salary,expenses"
+    "tags": "deductible,expenses,conditions",
+    "syllabus_codes": ["B2a", "B2b"]
   }}
 ]
 
-DOCUMENT ({tax_type} — {doc_ref}):
-{text}"""
+DOCUMENT TYPE: regulation | TAX TYPE: {tax_type} | SOURCE: {doc_ref} | CHUNK {chunk_idx + 1}/{len(text_chunks)}
 
-    result = call_ai(prompt, model_tier="fast")
-    chunks = parse_ai_json_list(result['content'])
+DOCUMENT CHUNK:
+{chunk_text}"""
 
-    doc_slug = re.sub(r'[^A-Za-z0-9]', '', doc_ref.replace('/', '-').replace(' ', ''))[:20]
-    rows = []
-    with get_db() as conn:
-        cur = conn.cursor()
-        for chunk in chunks:
-            art = re.sub(r'[^0-9]', '', chunk.get('article_no', '0'))
-            p = chunk.get('paragraph_no', 0)
-            reg_code = f"{tax_type}-{doc_slug}-Art{art}-P{p}"
-            cur.execute("""
-                INSERT INTO kb_regulation_parsed
-                  (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no, paragraph_text, tags, source_file)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                RETURNING id, reg_code
-            """, (session_id, tax_type, reg_code, doc_ref,
-                  chunk.get('article_no'), chunk.get('paragraph_no'),
-                  chunk.get('paragraph_text', ''), chunk.get('tags', ''), file_path))
-            row = cur.fetchone()
-            rows.append({"id": row[0], "reg_code": row[1], **chunk})
+        result = call_ai(prompt, model_tier='fast')
+        chunks_parsed = parse_ai_json_list(result['content'])
 
-    return {"parsed": len(rows), "rows": rows}
+        with get_db() as conn:
+            cur = conn.cursor()
+            for item in chunks_parsed:
+                art = re.sub(r'[^0-9]', '', str(item.get('article_no', '0')))
+                p = item.get('paragraph_no', 0)
+                reg_code = f'{tax_type}-{doc_slug}-Art{art}-P{p}'
+                syllabus_codes = item.get('syllabus_codes', [])
+                if isinstance(syllabus_codes, str):
+                    syllabus_codes = [s.strip() for s in syllabus_codes.split(',') if s.strip()]
+                cur.execute("""
+                    INSERT INTO kb_regulation_parsed
+                      (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
+                       paragraph_text, syllabus_codes, tags, source_file)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
+                """, (session_id, tax_type, reg_code, doc_ref,
+                      item.get('article_no'), p,
+                      item.get('paragraph_text', ''),
+                      syllabus_codes,
+                      item.get('tags', ''),
+                      file_path))
+                all_rows.append({
+                    'reg_code': reg_code,
+                    'article_no': item.get('article_no'),
+                    'paragraph_no': p,
+                    'paragraph_text': item.get('paragraph_text', '')[:200],
+                    'syllabus_codes': syllabus_codes,
+                    'tags': item.get('tags', '')
+                })
+
+    if cleared > 0:
+        logger.info(f"Re-parse: cleared {cleared} existing rows for {file_path}")
+
+    return {
+        "parsed": len(all_rows),
+        "chunks_processed": len(text_chunks),
+        "re_parsed": cleared > 0,
+        "cleared": cleared,
+        "rows": all_rows
+    }
+
+
+@router.post("/regulations/parse-doc-async")
+def parse_regulation_doc_async(data: dict, background_tasks: BackgroundTasks):
+    """Start async chunked parse job. Returns job_id to poll."""
+    import uuid
+    job_id = str(uuid.uuid4())[:8]
+
+    # Clear existing rows first
+    session_id = data.get('session_id')
+    file_path = data.get('file_path', '')
+    if session_id and file_path:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM kb_regulation_parsed WHERE session_id = %s AND source_file = %s",
+                (session_id, file_path)
+            )
+            cleared = cur.rowcount
+    else:
+        cleared = 0
+
+    _parse_jobs[job_id] = {
+        "status": "running", "parsed": 0, "total_chunks": 0,
+        "chunk": 0, "rows": [], "cleared": cleared
+    }
+    background_tasks.add_task(_run_parse_job, job_id, data)
+    return {"job_id": job_id}
+
+
+@router.get("/regulations/parse-job/{job_id}")
+def get_parse_job(job_id: str):
+    job = _parse_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return job
 
 
 @router.get("/regulations/parsed")
-def list_parsed_regulations(session_id: Optional[int] = None, tax_type: Optional[str] = None,
-                             source_file: Optional[str] = None, limit: int = 200):
+def list_parsed_regulations(
+    session_id: Optional[int] = None,
+    tax_type: Optional[str] = None,
+    source_file: Optional[str] = None,
+    syllabus_code: Optional[str] = None,
+    article_no: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = Query(100, le=500),
+    offset: int = 0,
+):
     with get_db() as conn:
         cur = conn.cursor()
-        query = """SELECT id, session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
-                          paragraph_text, syllabus_codes, tags, source_file, is_active, created_at
+        query = """SELECT id, session_id, tax_type, reg_code, doc_ref, article_no,
+                          paragraph_no, paragraph_text, syllabus_codes, tags, source_file
                    FROM kb_regulation_parsed WHERE is_active = TRUE"""
         params = []
         if session_id:
@@ -480,12 +750,28 @@ def list_parsed_regulations(session_id: Optional[int] = None, tax_type: Optional
         if source_file:
             query += " AND source_file = %s"
             params.append(source_file)
-        query += " ORDER BY tax_type, article_no, paragraph_no LIMIT %s"
-        params.append(limit)
-        cur.execute(query, params)
+        if syllabus_code:
+            query += " AND syllabus_codes @> %s"
+            params.append([syllabus_code])
+        if article_no:
+            query += " AND article_no ILIKE %s"
+            params.append(f"%{article_no}%")
+        if search:
+            query += " AND (reg_code ILIKE %s OR paragraph_text ILIKE %s OR tags ILIKE %s)"
+            params += [f"%{search}%", f"%{search}%", f"%{search}%"]
+
+        count_q = query.replace(
+            "SELECT id, session_id, tax_type, reg_code, doc_ref, article_no,\n                          paragraph_no, paragraph_text, syllabus_codes, tags, source_file",
+            "SELECT COUNT(*)"
+        )
+        cur.execute(count_q, params)
+        total = cur.fetchone()[0]
+
+        query += " ORDER BY doc_ref, article_no, paragraph_no LIMIT %s OFFSET %s"
+        cur.execute(query, params + [limit, offset])
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, r)) for r in rows]
+    return {"total": total, "items": [dict(zip(cols, r)) for r in rows]}
 
 
 @router.get("/regulations/search")
@@ -624,3 +910,166 @@ def delete_tax_rate(item_id: int):
         cur = conn.cursor()
         cur.execute("DELETE FROM kb_tax_rates WHERE id = %s", (item_id,))
     return {"ok": True}
+
+
+# ============================================================
+# v2: BULK DELETE endpoints
+# ============================================================
+
+@router.delete("/syllabus/bulk")
+def bulk_delete_syllabus(data: dict):
+    """Delete multiple syllabus items by id list."""
+    ids = data.get('ids', [])
+    if not ids:
+        return {"deleted": 0}
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM kb_syllabus WHERE id = ANY(%s) RETURNING id", (ids,))
+        deleted = len(cur.fetchall())
+    return {"deleted": deleted}
+
+
+@router.delete("/regulation-parsed/bulk")
+def bulk_delete_reg_parsed(data: dict):
+    """Delete multiple parsed regulation items by id list."""
+    ids = data.get('ids', [])
+    if not ids:
+        return {"deleted": 0}
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM kb_regulation_parsed WHERE id = ANY(%s) RETURNING id", (ids,))
+        deleted = len(cur.fetchall())
+    return {"deleted": deleted}
+
+
+# ============================================================
+# v2: REGULATION FILES list
+# ============================================================
+
+@router.get("/regulations/files")
+def list_regulation_files(session_id: int, tax_type: Optional[str] = None):
+    """Return distinct source files with their paragraph counts."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        query = """
+            SELECT source_file, doc_ref, tax_type, COUNT(*) as paragraph_count
+            FROM kb_regulation_parsed
+            WHERE session_id = %s AND is_active = TRUE
+        """
+        params = [session_id]
+        if tax_type:
+            query += " AND tax_type = %s"
+            params.append(tax_type)
+        query += " GROUP BY source_file, doc_ref, tax_type ORDER BY doc_ref"
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+# ============================================================
+# v2: AUTO-SUGGEST CODES
+# ============================================================
+
+@router.post("/suggest-codes")
+def suggest_codes(data: dict):
+    """Given question content, session_id, tax_type — use AI to suggest syllabus + reg codes."""
+    import re as _re
+
+    content = data.get('content', '')
+    tax_type = data.get('tax_type', '')
+    session_id = data.get('session_id')
+    question_type = data.get('question_type', '')
+
+    clean_content = _re.sub(r'<[^>]+>', ' ', content).strip()
+    if len(clean_content) < 30:
+        return {"syllabus_codes": [], "reg_codes": []}
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COALESCE(syllabus_code, section_code) as code,
+                   COALESCE(topic, section_title) as topic,
+                   COALESCE(detailed_syllabus, content) as detail
+            FROM kb_syllabus
+            WHERE session_id = %s AND COALESCE(tax_type, sac_thue) = %s
+              AND COALESCE(syllabus_code, section_code) IS NOT NULL
+            ORDER BY COALESCE(syllabus_code, section_code)
+        """, (session_id, tax_type))
+        syllabus_rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT reg_code, doc_ref, LEFT(paragraph_text, 200) as text
+            FROM kb_regulation_parsed
+            WHERE session_id = %s AND tax_type = %s AND is_active = TRUE
+            ORDER BY reg_code
+        """, (session_id, tax_type))
+        reg_rows = cur.fetchall()
+
+    if not syllabus_rows and not reg_rows:
+        return {"syllabus_codes": [], "reg_codes": []}
+
+    syllabus_list = "\n".join(f"- [{r[0]}] {r[1]}: {r[2][:100]}" for r in syllabus_rows[:60])
+    reg_list = "\n".join(f"- [{r[0]}] ({r[1]}): {r[2]}" for r in reg_rows[:60])
+
+    prompt = f"""You are an ACCA TX(VNM) exam analyst. Given a question, identify which syllabus items and regulation paragraphs it tests or references.
+
+QUESTION ({question_type} — {tax_type}):
+{clean_content[:2000]}
+
+AVAILABLE SYLLABUS ITEMS:
+{syllabus_list if syllabus_list else "(none loaded yet)"}
+
+AVAILABLE REGULATION PARAGRAPHS:
+{reg_list if reg_list else "(none loaded yet)"}
+
+Return ONLY valid JSON (no markdown):
+{{
+    "syllabus_codes": [
+        {{"code": "B2a", "reason": "Question directly tests deductibility of salary expenses"}}
+    ],
+    "reg_codes": [
+        {{"reg_code": "CIT-ND320-Art9-P1", "reason": "The 5x salary cap rule is central to this question"}}
+    ]
+}}
+
+Rules:
+- Only suggest codes that ACTUALLY appear in the lists above
+- Suggest 1-5 syllabus codes max, 0-3 reg codes max
+- If nothing matches well, return empty arrays
+"""
+
+    result = call_ai(prompt, model_tier="fast")
+    try:
+        parsed = parse_ai_json(result['content'])
+        suggested_codes = parsed.get('syllabus_codes', [])
+        suggested_regs = parsed.get('reg_codes', [])
+
+        syllabus_map = {r[0]: {'topic': r[1], 'detail': r[2]} for r in syllabus_rows}
+        reg_map = {r[0]: {'doc_ref': r[1], 'text': r[2]} for r in reg_rows}
+
+        enriched_syllabus = []
+        for s in suggested_codes:
+            code = s.get('code', '')
+            if code in syllabus_map:
+                enriched_syllabus.append({
+                    'code': code,
+                    'topic': syllabus_map[code]['topic'],
+                    'detail': syllabus_map[code]['detail'][:120],
+                    'reason': s.get('reason', '')
+                })
+
+        enriched_regs = []
+        for r in suggested_regs:
+            rc = r.get('reg_code', '')
+            if rc in reg_map:
+                enriched_regs.append({
+                    'reg_code': rc,
+                    'doc_ref': reg_map[rc]['doc_ref'],
+                    'text': reg_map[rc]['text'],
+                    'reason': r.get('reason', '')
+                })
+
+        return {"syllabus_codes": enriched_syllabus, "reg_codes": enriched_regs}
+    except Exception:
+        return {"syllabus_codes": [], "reg_codes": []}

@@ -136,6 +136,7 @@ def generate_mcq(req: MCQGenerateRequest):
 
         return {
             "id": q_id,
+            "question_id": q_id,
             "content_json": content_json,
             "content_html": content_html,
             "model_used": result["model"],
@@ -204,6 +205,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
 
         return {
             "id": q_id,
+            "question_id": q_id,
             "content_json": content_json,
             "content_html": content_html,
             "model_used": result["model"],
@@ -267,6 +269,7 @@ def generate_longform(req: LongformGenerateRequest):
 
         return {
             "id": q_id,
+            "question_id": q_id,
             "content_json": content_json,
             "content_html": content_html,
             "model_used": result["model"],

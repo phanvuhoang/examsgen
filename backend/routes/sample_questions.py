@@ -143,6 +143,20 @@ def update_sample_question(item_id: int, item: SampleQuestionUpdate):
     return {"ok": True}
 
 
+@router.patch("/{item_id}/codes")
+def update_sample_question_codes(item_id: int, data: dict):
+    """Update syllabus_codes and reg_codes for a sample question."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE sample_questions SET syllabus_codes = %s, reg_codes = %s WHERE id = %s RETURNING id",
+            (data.get('syllabus_codes', []), data.get('reg_codes', []), item_id)
+        )
+        if not cur.fetchone():
+            raise HTTPException(404, "Not found")
+    return {"ok": True}
+
+
 @router.delete("/{item_id}")
 def delete_sample_question(item_id: int):
     with get_db() as conn:

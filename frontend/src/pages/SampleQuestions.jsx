@@ -25,7 +25,7 @@ function Modal({ title, children, onClose }) {
   )
 }
 
-function SampleForm({ initial, taxTypes, onSave, onCancel }) {
+function SampleForm({ initial, taxTypes, sessionId, onSave, onCancel }) {
   const [form, setForm] = useState({
     question_type: 'MCQ', question_subtype: '', tax_type: 'CIT',
     title: '', content: '', answer: '', marks: '', exam_ref: '',
@@ -33,6 +33,10 @@ function SampleForm({ initial, taxTypes, onSave, onCancel }) {
     ...initial,
   })
   const [saving, setSaving] = useState(false)
+  const [suggestions, setSuggestions] = useState(null)
+  const [suggestLoading, setSuggestLoading] = useState(false)
+  const [savedCodes, setSavedCodes] = useState(false)
+  const [savedItemId, setSavedItemId] = useState(initial?.id || null)
 
   const handleSave = async () => {
     if (!form.content.trim()) { alert('Question content is required'); return }
@@ -49,7 +53,21 @@ function SampleForm({ initial, taxTypes, onSave, onCancel }) {
           : form.reg_codes || [],
         question_subtype: form.question_type === 'MCQ' ? form.question_subtype : null,
       }
-      await onSave(payload)
+      const saved = await onSave(payload)
+      const itemId = saved?.id || initial?.id
+      if (itemId) {
+        setSavedItemId(itemId)
+        setSuggestions(null)
+        setSavedCodes(false)
+        setSuggestLoading(true)
+        api.suggestCodes({
+          content: form.content + ' ' + (form.answer || ''),
+          tax_type: form.tax_type,
+          session_id: sessionId,
+          question_type: form.question_type,
+        }).then((s) => { setSuggestions(s); setSuggestLoading(false) })
+          .catch(() => setSuggestLoading(false))
+      }
     } catch (err) { alert('Save failed: ' + err.message) }
     finally { setSaving(false) }
   }
@@ -137,6 +155,55 @@ function SampleForm({ initial, taxTypes, onSave, onCancel }) {
         </button>
         <button onClick={onCancel} className="px-4 py-2 border text-sm rounded-lg hover:bg-gray-50">Cancel</button>
       </div>
+
+      {/* Suggestion panel — shows after save */}
+      {(suggestLoading || suggestions) && (
+        <div className="mt-4 border rounded-xl overflow-hidden">
+          <div className="bg-amber-50 px-4 py-2 border-b flex items-center gap-2">
+            <span className="text-sm font-semibold text-amber-700">🏷️ Suggested Tags</span>
+            {suggestLoading && <span className="text-xs text-gray-400 ml-auto animate-pulse">Analysing...</span>}
+          </div>
+          {!suggestLoading && suggestions && (
+            <div className="p-3 space-y-2">
+              {suggestions.syllabus_codes?.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {suggestions.syllabus_codes.map((s) => (
+                    <span key={s.code} className="px-2 py-0.5 bg-blue-50 border border-blue-200 rounded text-xs font-mono text-blue-700">{s.code}</span>
+                  ))}
+                </div>
+              )}
+              {suggestions.reg_codes?.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {suggestions.reg_codes.map((r) => (
+                    <span key={r.reg_code} className="px-2 py-0.5 bg-green-50 border border-green-200 rounded text-xs font-mono text-green-700">{r.reg_code}</span>
+                  ))}
+                </div>
+              )}
+              {(suggestions.syllabus_codes?.length > 0 || suggestions.reg_codes?.length > 0) && !savedCodes && savedItemId && (
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={async () => {
+                      await api.updateSampleQuestionCodes(savedItemId, {
+                        syllabus_codes: suggestions.syllabus_codes.map((s) => s.code),
+                        reg_codes: suggestions.reg_codes.map((r) => r.reg_code),
+                      })
+                      setSavedCodes(true)
+                    }}
+                    className="px-3 py-1 bg-[#028a39] text-white rounded text-xs hover:bg-[#027a32]"
+                  >
+                    ✓ Save tags
+                  </button>
+                  <button onClick={() => setSuggestions(null)} className="px-3 py-1 text-gray-500 text-xs hover:text-gray-700">Dismiss</button>
+                </div>
+              )}
+              {savedCodes && <p className="text-xs text-green-600">✓ Tags saved</p>}
+              {suggestions.syllabus_codes?.length === 0 && suggestions.reg_codes?.length === 0 && (
+                <p className="text-xs text-gray-400">No matching references found.</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -177,15 +244,15 @@ export default function SampleQuestions() {
   useEffect(() => { fetchItems() }, [filters])
 
   const handleCreate = async (payload) => {
-    await api.createSampleQuestion(payload)
-    setShowAdd(false)
+    const saved = await api.createSampleQuestion(payload)
     fetchItems()
+    return saved
   }
 
   const handleUpdate = async (payload) => {
     await api.updateSampleQuestion(editItem.id, payload)
-    setEditItem(null)
     fetchItems()
+    return { id: editItem.id }
   }
 
   const handleDelete = async (id) => {
@@ -285,14 +352,14 @@ export default function SampleQuestions() {
       {/* Add Modal */}
       {showAdd && (
         <Modal title="Add Sample Question" onClose={() => setShowAdd(false)}>
-          <SampleForm taxTypes={taxTypes} onSave={handleCreate} onCancel={() => setShowAdd(false)} />
+          <SampleForm taxTypes={taxTypes} sessionId={sessionId} onSave={handleCreate} onCancel={() => setShowAdd(false)} />
         </Modal>
       )}
 
       {/* Edit Modal */}
       {editItem && (
         <Modal title="Edit Sample Question" onClose={() => setEditItem(null)}>
-          <SampleForm initial={editItem} taxTypes={taxTypes} onSave={handleUpdate} onCancel={() => setEditItem(null)} />
+          <SampleForm initial={editItem} taxTypes={taxTypes} sessionId={sessionId} onSave={handleUpdate} onCancel={() => setEditItem(null)} />
         </Modal>
       )}
 

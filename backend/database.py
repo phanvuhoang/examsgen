@@ -227,6 +227,12 @@ def init_db():
             ALTER TABLE questions ADD COLUMN IF NOT EXISTS reg_codes TEXT[];
         """)
 
+        # Unique index for chunked parse ON CONFLICT DO NOTHING
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_reg_parsed_code_session
+              ON kb_regulation_parsed(session_id, reg_code);
+        """)
+
         # v2: seed default settings for existing sessions
         cur.execute("""
             UPDATE exam_sessions SET

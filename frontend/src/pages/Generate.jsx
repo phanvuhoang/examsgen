@@ -43,6 +43,11 @@ export default function Generate() {
   const [chatLoading, setChatLoading] = useState(false)
   const [currentContent, setCurrentContent] = useState(null)
   const [currentSession, setCurrentSession] = useState(null)
+  // v2: Auto-tag suggestions
+  const [suggestions, setSuggestions] = useState(null)
+  const [suggestLoading, setSuggestLoading] = useState(false)
+  const [savedCodes, setSavedCodes] = useState(false)
+  const [lastQuestionId, setLastQuestionId] = useState(null)
 
   // Load current session
   useEffect(() => {
@@ -128,6 +133,18 @@ export default function Generate() {
       setResult(data)
       setCurrentContent(data.content_json)
       setChatHistory([{ role: 'assistant', content: 'Question ready! Ask me to adjust anything — in English or Vietnamese.' }])
+      // Auto-suggest tags in background
+      setLastQuestionId(data.question_id)
+      setSuggestions(null)
+      setSavedCodes(false)
+      setSuggestLoading(true)
+      api.suggestCodes({
+        content: data.content_html || '',
+        tax_type: sac_thue,
+        session_id: currentSession?.id,
+        question_type: type,
+      }).then((s) => { setSuggestions(s); setSuggestLoading(false) })
+        .catch(() => setSuggestLoading(false))
     } catch (err) {
       setError(err.message || 'Generation failed')
     } finally {
@@ -490,6 +507,81 @@ export default function Generate() {
             className="question-html"
             dangerouslySetInnerHTML={{ __html: result.content_html }}
           />
+        </div>
+      )}
+
+      {/* Suggested Tags panel */}
+      {result && (
+        <div className="mt-4 border rounded-xl overflow-hidden shadow-sm">
+          <div className="bg-amber-50 px-4 py-2 border-b flex items-center gap-2">
+            <span className="text-sm font-semibold text-amber-700">🏷️ Suggested Tags</span>
+            <span className="text-xs text-amber-500">AI-detected syllabus & regulation references</span>
+            {suggestLoading && <span className="text-xs text-gray-400 ml-auto animate-pulse">Analysing...</span>}
+          </div>
+          {!suggestLoading && suggestions && (
+            <div className="p-4 space-y-3">
+              {suggestions.syllabus_codes?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-1">Syllabus Items</p>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestions.syllabus_codes.map((s) => (
+                      <div key={s.code} className="group relative">
+                        <span className="inline-flex items-center px-2 py-1 bg-blue-50 border border-blue-200 rounded text-xs font-mono text-blue-700 cursor-default">
+                          {s.code}
+                          <span className="hidden group-hover:block absolute bottom-full left-0 mb-1 w-64 bg-gray-800 text-white text-xs rounded p-2 z-10 shadow-lg whitespace-normal">
+                            <strong>{s.topic}</strong><br />{s.detail}<br /><em className="text-gray-300">{s.reason}</em>
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {suggestions.reg_codes?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-1">Regulation Paragraphs</p>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestions.reg_codes.map((r) => (
+                      <div key={r.reg_code} className="group relative">
+                        <span className="inline-flex items-center px-2 py-1 bg-green-50 border border-green-200 rounded text-xs font-mono text-green-700 cursor-default">
+                          {r.reg_code}
+                          <span className="hidden group-hover:block absolute bottom-full left-0 mb-1 w-64 bg-gray-800 text-white text-xs rounded p-2 z-10 shadow-lg whitespace-normal">
+                            <strong>{r.doc_ref}</strong><br />{r.text}<br /><em className="text-gray-300">{r.reason}</em>
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {suggestions.syllabus_codes?.length === 0 && suggestions.reg_codes?.length === 0 && (
+                <p className="text-xs text-gray-400">No matching references found. Upload syllabus/regulations in Knowledge Base first.</p>
+              )}
+              {(suggestions.syllabus_codes?.length > 0 || suggestions.reg_codes?.length > 0) && !savedCodes && (
+                <div className="pt-2 border-t flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      await api.updateQuestionCodes(lastQuestionId, {
+                        syllabus_codes: suggestions.syllabus_codes.map((s) => s.code),
+                        reg_codes: suggestions.reg_codes.map((r) => r.reg_code),
+                      })
+                      setSavedCodes(true)
+                    }}
+                    className="px-3 py-1.5 bg-[#028a39] text-white rounded text-xs font-medium hover:bg-[#027a32]"
+                  >
+                    ✓ Save these tags to question
+                  </button>
+                  <button
+                    onClick={() => setSuggestions({ syllabus_codes: [], reg_codes: [] })}
+                    className="px-3 py-1.5 text-gray-500 text-xs hover:text-gray-700"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+              {savedCodes && <p className="text-xs text-green-600">✓ Tags saved to question</p>}
+            </div>
+          )}
         </div>
       )}
 
