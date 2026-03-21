@@ -55,21 +55,30 @@ class ParseRequest(BaseModel):
 # --- Syllabus CRUD ---
 
 @router.get("/syllabus")
-def list_syllabus(session_id: Optional[int] = None, sac_thue: Optional[str] = None, search: Optional[str] = None):
+def list_syllabus(session_id: Optional[int] = None, sac_thue: Optional[str] = None,
+                  tax_type: Optional[str] = None, search: Optional[str] = None):
     with get_db() as conn:
         cur = conn.cursor()
-        query = "SELECT id, sac_thue, section_code, section_title, content, tags, is_active, created_at, session_id FROM kb_syllabus WHERE 1=1"
+        query = """SELECT id, sac_thue, section_code, section_title, content, tags, is_active,
+                          created_at, session_id,
+                          COALESCE(tax_type, sac_thue) as tax_type,
+                          COALESCE(syllabus_code, section_code) as syllabus_code,
+                          COALESCE(topic, section_title) as topic,
+                          COALESCE(detailed_syllabus, content) as detailed_syllabus
+                   FROM kb_syllabus WHERE 1=1"""
         params = []
         if session_id:
             query += " AND session_id = %s"
             params.append(session_id)
-        if sac_thue:
-            query += " AND sac_thue = %s"
-            params.append(sac_thue)
+        # Accept both tax_type (new) and sac_thue (legacy)
+        filter_tax = tax_type or sac_thue
+        if filter_tax:
+            query += " AND (COALESCE(tax_type, sac_thue) = %s)"
+            params.append(filter_tax)
         if search:
-            query += " AND (section_title ILIKE %s OR tags ILIKE %s OR content ILIKE %s)"
-            params += [f"%{search}%", f"%{search}%", f"%{search}%"]
-        query += " ORDER BY sac_thue, section_code, id"
+            query += " AND (section_title ILIKE %s OR tags ILIKE %s OR content ILIKE %s OR detailed_syllabus ILIKE %s)"
+            params += [f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%"]
+        query += " ORDER BY COALESCE(syllabus_code, section_code), id"
         cur.execute(query, params)
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
