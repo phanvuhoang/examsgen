@@ -106,6 +106,19 @@ def update_syllabus(item_id: int, item: SyllabusItem):
         )
 
 
+@router.delete("/syllabus/bulk")
+def bulk_delete_syllabus(data: dict):
+    """Delete multiple syllabus items by id list."""
+    ids = data.get('ids', [])
+    if not ids:
+        return {"deleted": 0}
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM kb_syllabus WHERE id = ANY(%s) RETURNING id", (ids,))
+        deleted = len(cur.fetchall())
+    return {"deleted": deleted}
+
+
 @router.delete("/syllabus/{item_id}")
 def delete_syllabus(item_id: int):
     with get_db() as conn:
@@ -684,7 +697,7 @@ def list_parsed_regulations(
     syllabus_code: Optional[str] = None,
     article_no: Optional[str] = None,
     search: Optional[str] = None,
-    limit: int = Query(100, le=500),
+    limit: int = Query(1000, le=2000),
     offset: int = 0,
 ):
     with get_db() as conn:
@@ -775,12 +788,119 @@ def update_parsed_regulation(item_id: int, data: dict):
     return {"ok": True}
 
 
+@router.delete("/regulation-parsed/bulk")
+def bulk_delete_reg_parsed(data: dict):
+    """Delete multiple parsed regulation items by id list."""
+    ids = data.get('ids', [])
+    if not ids:
+        return {"deleted": 0}
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM kb_regulation_parsed WHERE id = ANY(%s) RETURNING id", (ids,))
+        deleted = len(cur.fetchall())
+    return {"deleted": deleted}
+
+
 @router.delete("/regulation-parsed/{item_id}")
 def delete_parsed_regulation(item_id: int):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("DELETE FROM kb_regulation_parsed WHERE id = %s", (item_id,))
     return {"ok": True}
+
+
+@router.post("/regulation-parsed/import")
+def import_regulation_parsed(data: dict):
+    """Bulk import pre-parsed regulation items (reg_code + paragraph_text required)."""
+    session_id  = data['session_id']
+    tax_type    = data['tax_type']
+    rows        = data['rows']
+    replace     = data.get('replace', True)
+    source_file = data.get('source_file', 'imported')
+
+    if not rows:
+        return {"imported": 0}
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cleared = 0
+        if replace:
+            cur.execute(
+                "DELETE FROM kb_regulation_parsed WHERE session_id = %s AND source_file = %s",
+                (session_id, source_file)
+            )
+            cleared = cur.rowcount
+
+        inserted = 0
+        for row in rows:
+            reg_code       = str(row.get('reg_code', '')).strip()
+            paragraph_text = str(row.get('paragraph_text', '')).strip()
+            if not reg_code or not paragraph_text:
+                continue
+
+            syllabus_codes = row.get('syllabus_codes', [])
+            if isinstance(syllabus_codes, str):
+                syllabus_codes = [s.strip() for s in syllabus_codes.split(',') if s.strip()]
+
+            cur.execute("""
+                INSERT INTO kb_regulation_parsed
+                  (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
+                   paragraph_text, syllabus_codes, tags, source_file, is_active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
+                ON CONFLICT (session_id, reg_code) DO UPDATE SET
+                  paragraph_text = EXCLUDED.paragraph_text,
+                  syllabus_codes = EXCLUDED.syllabus_codes,
+                  doc_ref        = EXCLUDED.doc_ref,
+                  article_no     = EXCLUDED.article_no,
+                  tags           = EXCLUDED.tags
+            """, (
+                session_id, tax_type, reg_code,
+                row.get('doc_ref', ''),
+                row.get('article_no', ''),
+                int(row.get('clause_no') or 0),
+                paragraph_text, syllabus_codes,
+                row.get('tags', ''),
+                row.get('source_file', source_file),
+            ))
+            inserted += 1
+
+    return {"imported": inserted, "cleared": cleared, "source_file": source_file}
+
+
+@router.post("/regulation-parsed/upload")
+async def upload_regulation_parsed(
+    file: UploadFile = File(...),
+    session_id: int = Form(...),
+    tax_type: str = Form(...),
+    replace: bool = Form(True),
+):
+    """Upload CSV or Excel of pre-parsed regulation items. Required columns: reg_code, paragraph_text."""
+    import pandas as pd
+    import io
+
+    content = await file.read()
+    try:
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(content))
+        else:
+            df = pd.read_excel(io.BytesIO(content))
+    except Exception as e:
+        return {"error": f"Cannot read file: {e}"}
+
+    required_cols = {'reg_code', 'paragraph_text'}
+    if not required_cols.issubset(df.columns):
+        missing = required_cols - set(df.columns)
+        return {"error": f"Missing required columns: {missing}"}
+
+    rows = df.where(pd.notnull(df), None).to_dict('records')
+
+    return import_regulation_parsed({
+        "session_id":  session_id,
+        "tax_type":    tax_type,
+        "rows":        rows,
+        "replace":     replace,
+        "source_file": file.filename,
+    })
 
 
 # ============================================================
@@ -868,36 +988,6 @@ def delete_tax_rate(item_id: int):
         cur = conn.cursor()
         cur.execute("DELETE FROM kb_tax_rates WHERE id = %s", (item_id,))
     return {"ok": True}
-
-
-# ============================================================
-# v2: BULK DELETE endpoints
-# ============================================================
-
-@router.delete("/syllabus/bulk")
-def bulk_delete_syllabus(data: dict):
-    """Delete multiple syllabus items by id list."""
-    ids = data.get('ids', [])
-    if not ids:
-        return {"deleted": 0}
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM kb_syllabus WHERE id = ANY(%s) RETURNING id", (ids,))
-        deleted = len(cur.fetchall())
-    return {"deleted": deleted}
-
-
-@router.delete("/regulation-parsed/bulk")
-def bulk_delete_reg_parsed(data: dict):
-    """Delete multiple parsed regulation items by id list."""
-    ids = data.get('ids', [])
-    if not ids:
-        return {"deleted": 0}
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM kb_regulation_parsed WHERE id = ANY(%s) RETURNING id", (ids,))
-        deleted = len(cur.fetchall())
-    return {"deleted": deleted}
 
 
 # ============================================================

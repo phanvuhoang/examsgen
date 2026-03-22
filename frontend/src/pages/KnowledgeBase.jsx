@@ -71,6 +71,7 @@ function SyllabusTab({ sessionId, taxTypes }) {
   const handleBulkDelete = async () => {
     if (!window.confirm(`Delete ${selectedIds.size} items? This cannot be undone.`)) return
     await api.bulkDeleteKBItems('syllabus', [...selectedIds])
+    setSelectedIds(new Set())
     fetchItems()
   }
 
@@ -322,7 +323,7 @@ function RegulationsTab({ sessionId, taxTypes }) {
     if (!sessionId) return
     setLoading(true)
     try {
-      const params = { session_id: sessionId }
+      const params = { session_id: sessionId, limit: 1000 }
       if (taxType) params.tax_type = taxType
       if (regFileFilter) params.source_file = regFileFilter
       if (syllabusFilter) params.syllabus_code = syllabusFilter
@@ -348,6 +349,7 @@ function RegulationsTab({ sessionId, taxTypes }) {
   const handleBulkDelete = async () => {
     if (!window.confirm(`Delete ${selectedIds.size} items? This cannot be undone.`)) return
     await api.bulkDeleteKBItems('regulation-parsed', [...selectedIds])
+    setSelectedIds(new Set())
     fetchParsed()
     fetchRegFiles()
   }
@@ -432,6 +434,44 @@ function RegulationsTab({ sessionId, taxTypes }) {
     finally { setTagLoading(false) }
   }
 
+  const handleClearAll = async () => {
+    if (!window.confirm(`Delete ALL ${total} parsed items for this session? This cannot be undone.`)) return
+    const allData = await api.getRegulationsParsed({ session_id: sessionId, tax_type: taxType || undefined, limit: 5000 })
+    const allIds = (allData.items || []).map((i) => i.id)
+    if (allIds.length > 0) {
+      await api.bulkDeleteKBItems('regulation-parsed', allIds)
+    }
+    fetchParsed()
+    fetchRegFiles()
+  }
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files[0]
+    if (!file || !taxType || !sessionId) { alert('Select tax type first'); return }
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('session_id', sessionId)
+    fd.append('tax_type', taxType)
+    fd.append('replace', 'true')
+    setLoading(true)
+    try {
+      const res = await fetch('/api/kb/regulation-parsed/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: fd,
+      })
+      const data = await res.json()
+      if (data.error) {
+        alert(`Import failed: ${data.error}`)
+      } else {
+        setToast(`Imported ${data.imported} items (cleared ${data.cleared} existing)`)
+        fetchParsed()
+        fetchRegFiles()
+      }
+    } catch (err) { alert(`Import error: ${err.message}`) }
+    finally { setLoading(false); e.target.value = '' }
+  }
+
   const untaggedCount = parsedRows.filter((i) => !i.syllabus_codes || i.syllabus_codes.length === 0).length
 
   const allSelected = parsedRows.length > 0 && selectedIds.size === parsedRows.length
@@ -456,6 +496,18 @@ function RegulationsTab({ sessionId, taxTypes }) {
           className="px-3 py-1.5 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-lg disabled:opacity-50"
         >
           {tagLoading ? 'Tagging...' : `🏷 Tag Syllabus (${untaggedCount} untagged)`}
+        </button>
+        <label className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer">
+          📥 Import CSV/Excel
+          <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImportFile} />
+        </label>
+        <button
+          onClick={handleClearAll}
+          disabled={parsedRows.length === 0}
+          className="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50"
+          title="Delete ALL parsed items for this session"
+        >
+          🗑 Clear All ({total})
         </button>
       </div>
 
@@ -518,7 +570,7 @@ function RegulationsTab({ sessionId, taxTypes }) {
           <button onClick={() => { setRegFileFilter(''); setSyllabusFilter(''); setArticleFilter(''); setSearch('') }}
             className="text-xs text-gray-500 hover:text-gray-700 underline">Clear filters</button>
         )}
-        <span className="text-xs text-gray-400 ml-auto">{total} paragraphs</span>
+        <span className="text-xs text-gray-400 ml-auto">Showing {parsedRows.length} of {total} items</span>
       </div>
 
       {/* Bulk action bar */}
