@@ -549,8 +549,9 @@ DOCUMENT CHUNK:
             with get_db() as conn:
                 cur = conn.cursor()
                 for item in chunks_parsed:
-                    art = re.sub(r'[^0-9]', '', str(item.get('article_no', '0')))
-                    p = item.get('paragraph_no', 0)
+                    art_raw = str(item.get('article_no', '') or '')
+                    art = re.sub(r'[^0-9]', '', art_raw) or '0'
+                    p = item.get('paragraph_no', 0) or 0
                     reg_code = f'{tax_type}-{doc_slug}-Art{art}-P{p}'
                     syllabus_codes = item.get('syllabus_codes', [])
                     if isinstance(syllabus_codes, str):
@@ -739,7 +740,7 @@ def list_parsed_regulations(
         query += """
             ORDER BY
               doc_ref,
-              (regexp_replace(reg_code, '.*Art(\\d+).*', '\\1', 'g'))::int,
+              COALESCE(NULLIF(regexp_replace(reg_code, '.*Art(\\d+).*', '\\1', 'g'), reg_code), '0')::int,
               COALESCE(NULLIF(regexp_replace(reg_code, '.*\\.(\\d+)\\.[a-z].*', '\\1', 'g'), reg_code), '0')::int,
               reg_code
             LIMIT %s OFFSET %s"""
