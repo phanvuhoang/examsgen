@@ -296,6 +296,7 @@ function RegulationsTab({ sessionId, taxTypes }) {
   const [editItem, setEditItem] = useState(null)
   const [toast, setToast] = useState('')
   const [selectedIds, setSelectedIds] = useState(new Set())
+  const [tagLoading, setTagLoading] = useState(false)
   // Filters
   const [regFileFilter, setRegFileFilter] = useState('')
   const [syllabusFilter, setSyllabusFilter] = useState('')
@@ -417,6 +418,22 @@ function RegulationsTab({ sessionId, taxTypes }) {
     try { await api.deleteParsedRegulation(id); fetchParsed() } catch { }
   }
 
+  const handleTagSyllabus = async () => {
+    setTagLoading(true)
+    try {
+      const res = await api.tagSyllabus(sessionId, taxType || null)
+      if (res.tagged > 0) {
+        setToast(`Tagged ${res.tagged}/${res.total_items} items`)
+        fetchParsed()
+      } else {
+        setToast(res.message || 'No untagged items found')
+      }
+    } catch (err) { setToast('Tagging failed: ' + err.message) }
+    finally { setTagLoading(false) }
+  }
+
+  const untaggedCount = parsedRows.filter((i) => !i.syllabus_codes || i.syllabus_codes.length === 0).length
+
   const allSelected = parsedRows.length > 0 && selectedIds.size === parsedRows.length
   const someSelected = selectedIds.size > 0 && selectedIds.size < parsedRows.length
 
@@ -433,6 +450,13 @@ function RegulationsTab({ sessionId, taxTypes }) {
           + Upload File
           <input type="file" accept=".doc,.docx,.pdf,.txt" onChange={handleUploadFile} className="hidden" />
         </label>
+        <button
+          onClick={handleTagSyllabus}
+          disabled={tagLoading || parsedRows.length === 0}
+          className="px-3 py-1.5 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-lg disabled:opacity-50"
+        >
+          {tagLoading ? 'Tagging...' : `🏷 Tag Syllabus (${untaggedCount} untagged)`}
+        </button>
       </div>
 
       {/* Files */}

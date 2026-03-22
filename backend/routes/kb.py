@@ -567,22 +567,29 @@ DOCUMENT CHUNK:
 
 @router.post("/regulations/parse-doc")
 def parse_regulation_doc(data: dict):
-    """AI-parse a regulation document into kb_regulation_parsed rows (chunked, clears first)."""
+    """Rule-based parse of a regulation document into kb_regulation_parsed rows (clears first)."""
     import os
-    from backend.context_builder import extract_text_from_file
     from backend.config import DATA_DIR
+    from backend.utils.rule_parser import extract_text_from_file as rule_extract, parse_regulation_text
 
     session_id = data['session_id']
     tax_type = data['tax_type']
     file_path = data['file_path']
     doc_ref = data.get('doc_ref', '')
+    doc_slug = data.get('doc_slug', '')
 
-    # Clear existing rows for this file (smart re-parse)
+    if not doc_slug:
+        base = os.path.splitext(os.path.basename(file_path))[0]
+        doc_slug = base.replace(' ', '-').replace('_', '-')
+
+    source_file = os.path.basename(file_path)
+
+    # Clear existing rows for this file (idempotent re-parse)
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
             "DELETE FROM kb_regulation_parsed WHERE session_id = %s AND source_file = %s",
-            (session_id, file_path)
+            (session_id, source_file)
         )
         cleared = cur.rowcount
 
@@ -590,101 +597,46 @@ def parse_regulation_doc(data: dict):
     if not os.path.exists(full_path):
         raise HTTPException(404, f"File not found: {file_path}")
 
-    text = extract_text_from_file(full_path)
-    if not text or len(text) < 100:
-        raise HTTPException(400, "Could not extract text from file")
+    # Rule-based parse
+    try:
+        text = rule_extract(full_path)
+        items = parse_regulation_text(text, doc_slug, tax_type, doc_ref)
+    except Exception as e:
+        return {"error": str(e), "parsed": 0}
 
-    # Load syllabus context
+    # Insert into DB
+    inserted = 0
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("""
-            SELECT COALESCE(syllabus_code, section_code) as code,
-                   COALESCE(topic, section_title) as topic,
-                   COALESCE(detailed_syllabus, content) as detail
-            FROM kb_syllabus
-            WHERE session_id = %s AND COALESCE(tax_type, sac_thue) = %s
-              AND COALESCE(syllabus_code, section_code) IS NOT NULL
-            ORDER BY COALESCE(syllabus_code, section_code)
-        """, (session_id, tax_type))
-        syllabus_rows = cur.fetchall()
-
-    syllabus_context = ''
-    if syllabus_rows:
-        syllabus_list = '\n'.join(f'- [{r[0]}] {r[1]}: {r[2][:80]}' for r in syllabus_rows[:80])
-        syllabus_context = f'\n\nAVAILABLE SYLLABUS CODES (match paragraphs to these if relevant):\n{syllabus_list}'
-
-    text_chunks = _split_into_article_chunks(text, max_chars=8000)
-    doc_slug = re.sub(r'[^A-Za-z0-9]', '', doc_ref.replace('/', '-').replace(' ', ''))[:20]
-    all_rows = []
-
-    for chunk_idx, chunk_text in enumerate(text_chunks):
-        prompt = f"""Parse this Vietnamese tax regulation document chunk into individual paragraphs.
-
-For each paragraph extract:
-- article_no: article number if present (e.g. "Article 12" or "Điều 12")
-- paragraph_no: sequential number within that article (1, 2, 3...)
-- paragraph_text: the complete text of this paragraph (keep original wording)
-- tags: 3-6 English keywords
-- syllabus_codes: array of matching syllabus codes from the list below (empty array [] if none match){syllabus_context}
-
-Return ONLY valid JSON array, no markdown:
-[
-  {{
-    "article_no": "Article 9",
-    "paragraph_no": 1,
-    "paragraph_text": "...",
-    "tags": "deductible,expenses,conditions",
-    "syllabus_codes": ["B2a", "B2b"]
-  }}
-]
-
-DOCUMENT TYPE: regulation | TAX TYPE: {tax_type} | SOURCE: {doc_ref} | CHUNK {chunk_idx + 1}/{len(text_chunks)}
-
-DOCUMENT CHUNK:
-{chunk_text}"""
-
-        result = call_ai(prompt, model_tier='fast')
-        chunks_parsed = parse_ai_json_list(result['content'])
-
-        with get_db() as conn:
-            cur = conn.cursor()
-            for item in chunks_parsed:
-                art = re.sub(r'[^0-9]', '', str(item.get('article_no', '0')))
-                p = item.get('paragraph_no', 0)
-                reg_code = f'{tax_type}-{doc_slug}-Art{art}-P{p}'
-                syllabus_codes = item.get('syllabus_codes', [])
-                if isinstance(syllabus_codes, str):
-                    syllabus_codes = [s.strip() for s in syllabus_codes.split(',') if s.strip()]
-                cur.execute("""
-                    INSERT INTO kb_regulation_parsed
-                      (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
-                       paragraph_text, syllabus_codes, tags, source_file)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT DO NOTHING
-                """, (session_id, tax_type, reg_code, doc_ref,
-                      item.get('article_no'), p,
-                      item.get('paragraph_text', ''),
-                      syllabus_codes,
-                      item.get('tags', ''),
-                      file_path))
-                all_rows.append({
-                    'reg_code': reg_code,
-                    'article_no': item.get('article_no'),
-                    'paragraph_no': p,
-                    'paragraph_text': item.get('paragraph_text', '')[:200],
-                    'syllabus_codes': syllabus_codes,
-                    'tags': item.get('tags', '')
-                })
+        for item in items:
+            cur.execute("""
+                INSERT INTO kb_regulation_parsed
+                  (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
+                   paragraph_text, syllabus_codes, tags, source_file, is_active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
+                ON CONFLICT (session_id, reg_code) DO UPDATE SET
+                  paragraph_text = EXCLUDED.paragraph_text,
+                  doc_ref        = EXCLUDED.doc_ref,
+                  article_no     = EXCLUDED.article_no
+            """, (
+                session_id, item['tax_type'], item['reg_code'], item['doc_ref'],
+                item['article_no'], int(item['clause_no'] or 0),
+                item['paragraph_text'],
+                [],
+                item['title'][:200],
+                source_file,
+            ))
+            inserted += 1
 
     if cleared > 0:
-        logger.info(f"Re-parse: cleared {cleared} existing rows for {file_path}")
+        logger.info(f"Re-parse: cleared {cleared} existing rows for {source_file}")
 
     return {
-        "parsed": len(all_rows),
-        "chunks_processed": len(text_chunks),
-        "re_parsed": cleared > 0,
+        "parsed": inserted,
         "cleared": cleared,
-        "rows": all_rows
+        "re_parsed": cleared > 0,
+        "doc_slug": doc_slug,
+        "source": "rule-based",
     }
 
 
@@ -767,7 +719,13 @@ def list_parsed_regulations(
         cur.execute(count_q, params)
         total = cur.fetchone()[0]
 
-        query += " ORDER BY doc_ref, article_no, paragraph_no LIMIT %s OFFSET %s"
+        query += """
+            ORDER BY
+              doc_ref,
+              (regexp_replace(reg_code, '.*Art(\\d+).*', '\\1', 'g'))::int,
+              COALESCE(NULLIF(regexp_replace(reg_code, '.*\\.(\\d+)\\.[a-z].*', '\\1', 'g'), reg_code), '0')::int,
+              reg_code
+            LIMIT %s OFFSET %s"""
         cur.execute(query, params + [limit, offset])
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
@@ -940,6 +898,112 @@ def bulk_delete_reg_parsed(data: dict):
         cur.execute("DELETE FROM kb_regulation_parsed WHERE id = ANY(%s) RETURNING id", (ids,))
         deleted = len(cur.fetchall())
     return {"deleted": deleted}
+
+
+# ============================================================
+# v2: AI TAG SYLLABUS CODES
+# ============================================================
+
+@router.post("/regulations/tag-syllabus")
+def tag_syllabus_codes(data: dict):
+    """Use AI to suggest syllabus_codes for regulation items with empty codes. Runs in batches of 20."""
+    import json as _json
+    import re as _re
+
+    session_id = data['session_id']
+    tax_type   = data.get('tax_type')
+    force      = data.get('force', False)
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        # Load syllabus for context
+        cur.execute("""
+            SELECT COALESCE(syllabus_code, section_code),
+                   COALESCE(topic, section_title),
+                   COALESCE(detailed_syllabus, content)
+            FROM kb_syllabus
+            WHERE session_id = %s
+              AND (%s IS NULL OR COALESCE(tax_type, sac_thue) = %s)
+              AND COALESCE(syllabus_code, section_code) IS NOT NULL
+            ORDER BY COALESCE(syllabus_code, section_code)
+        """, (session_id, tax_type, tax_type))
+        syllabus_rows = cur.fetchall()
+
+        if not syllabus_rows:
+            return {"error": "No syllabus loaded for this session", "tagged": 0}
+
+        # Load untagged (or all if force=True) regulation items
+        if force:
+            cur.execute("""
+                SELECT id, reg_code, paragraph_text
+                FROM kb_regulation_parsed
+                WHERE session_id = %s AND (%s IS NULL OR tax_type = %s)
+                ORDER BY id
+            """, (session_id, tax_type, tax_type))
+        else:
+            cur.execute("""
+                SELECT id, reg_code, paragraph_text
+                FROM kb_regulation_parsed
+                WHERE session_id = %s
+                  AND (%s IS NULL OR tax_type = %s)
+                  AND (syllabus_codes IS NULL OR syllabus_codes = '{}')
+                ORDER BY id
+            """, (session_id, tax_type, tax_type))
+        items = cur.fetchall()
+
+    if not items:
+        return {"tagged": 0, "message": "No untagged items found"}
+
+    syllabus_list = '\n'.join(
+        f'- [{r[0]}] {r[1]}: {r[2][:80] if r[2] else ""}' for r in syllabus_rows[:80]
+    )
+
+    tagged = 0
+    batch_size = 20
+
+    for i in range(0, len(items), batch_size):
+        batch = items[i:i + batch_size]
+        items_text = '\n\n'.join(f'[{item[1]}]\n{item[2][:300]}' for item in batch)
+
+        prompt = f"""You are an ACCA TX(VNM) exam analyst. For each regulation item below, identify which syllabus items it relates to.
+
+SYLLABUS ITEMS:
+{syllabus_list}
+
+REGULATION ITEMS TO CLASSIFY:
+{items_text}
+
+Return ONLY valid JSON (no markdown), mapping reg_code to array of matching syllabus codes:
+{{
+  "CIT-Decree320-2025-Art9.1.a": ["B2a", "B2b"],
+  "CIT-Decree320-2025-Art23.1.a": ["C1a"]
+}}
+
+Rules:
+- Only include codes that ACTUALLY appear in the syllabus list above
+- If no good match, use empty array []
+- Be precise: only codes directly relevant to what the item governs
+"""
+        try:
+            result = call_ai(prompt, model_tier='fast')
+            json_match = _re.search(r'\{[\s\S]+\}', result['content'])
+            if json_match:
+                batch_result = _json.loads(json_match.group())
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    for item in batch:
+                        codes = batch_result.get(item[1], [])
+                        if codes or force:
+                            cur.execute(
+                                "UPDATE kb_regulation_parsed SET syllabus_codes = %s WHERE id = %s",
+                                (codes, item[0])
+                            )
+                            tagged += 1
+        except Exception as e:
+            logger.warning(f"AI tagging batch {i // batch_size + 1} failed: {e}")
+            continue
+
+    return {"tagged": tagged, "total_items": len(items), "syllabus_count": len(syllabus_rows)}
 
 
 # ============================================================

@@ -274,6 +274,13 @@ export const api = {
     }
   },
 
+  // v2: AI-tag syllabus codes for untagged regulation items
+  tagSyllabus: (sessionId, taxType = null) =>
+    request('/kb/regulations/tag-syllabus', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, tax_type: taxType }),
+    }),
+
   // v2: Get regulation files with paragraph counts
   getRegulationFiles: (params = {}) => {
     const q = new URLSearchParams(params)
