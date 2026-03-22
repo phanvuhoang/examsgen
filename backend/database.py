@@ -233,6 +233,13 @@ def init_db():
               ON kb_regulation_parsed(session_id, reg_code);
         """)
 
+        # Fix: ensure is_active has proper default and heal NULL rows
+        cur.execute("""
+            ALTER TABLE kb_regulation_parsed
+                ALTER COLUMN is_active SET DEFAULT TRUE;
+        """)
+        cur.execute("UPDATE kb_regulation_parsed SET is_active = TRUE WHERE is_active IS NULL")
+
         # v2: session tagging for sample_questions
         cur.execute("""
             ALTER TABLE sample_questions ADD COLUMN IF NOT EXISTS exam_session_id INTEGER REFERENCES exam_sessions(id);

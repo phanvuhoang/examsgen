@@ -558,9 +558,13 @@ DOCUMENT CHUNK:
                     cur.execute("""
                         INSERT INTO kb_regulation_parsed
                           (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
-                           paragraph_text, syllabus_codes, tags, source_file)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT DO NOTHING
+                           paragraph_text, syllabus_codes, tags, source_file, is_active)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, TRUE)
+                        ON CONFLICT (session_id, reg_code) DO UPDATE SET
+                          paragraph_text = EXCLUDED.paragraph_text,
+                          syllabus_codes = EXCLUDED.syllabus_codes,
+                          tags           = EXCLUDED.tags,
+                          is_active      = TRUE
                     """, (session_id, tax_type, reg_code, doc_ref,
                           item.get('article_no'), p,
                           item.get('paragraph_text', ''),
