@@ -323,14 +323,16 @@ function RegulationsTab({ sessionId, taxTypes }) {
     if (!sessionId) return
     setLoading(true)
     try {
-      const params = { session_id: sessionId, limit: 1000 }
-      if (taxType) params.tax_type = taxType
-      if (regFileFilter) params.source_file = regFileFilter
-      if (syllabusFilter) params.syllabus_code = syllabusFilter
-      if (articleFilter) params.article_no = articleFilter
-      if (search) params.search = search
-      const data = await api.getRegulationsParsed(params)
-      setParsedRows(data.items || [])
+      const params = new URLSearchParams({ session_id: sessionId, limit: 2000, offset: 0 })
+      if (taxType) params.append('tax_type', taxType)
+      if (search) params.append('search', search)
+      const data = await api.getRegulationParsed(params.toString())
+      // Client-side filter for source_file, syllabus_code, article_no (not in new endpoint)
+      let items = data.items || []
+      if (regFileFilter) items = items.filter((i) => i.source_file === regFileFilter)
+      if (syllabusFilter) items = items.filter((i) => (i.syllabus_codes || []).includes(syllabusFilter))
+      if (articleFilter) items = items.filter((i) => (i.article_no || '').toLowerCase().includes(articleFilter.toLowerCase()))
+      setParsedRows(items)
       setTotal(data.total || 0)
       setSelectedIds(new Set())
     } catch { setParsedRows([]); setTotal(0) }
@@ -373,28 +375,31 @@ function RegulationsTab({ sessionId, taxTypes }) {
     const docRef = prompt('Enter document reference (e.g. "Decree 320/2025/ND-CP"):', file.file_name.replace(/\.(docx?|pdf)$/i, ''))
     if (docRef === null) return
     try {
-      const { job_id } = await api.parseRegulationDocAsync({
+      const res = await api.parseRegDoc({
         session_id: parseInt(sessionId),
         tax_type: taxType || file.sac_thue,
         file_path: file.file_path,
         doc_ref: docRef,
       })
-      setParseStatus((p) => ({ ...p, [file.id]: { jobId: job_id, status: 'running', parsed: 0, total_chunks: 0, chunk: 0 } }))
-
-      const poll = setInterval(async () => {
-        try {
-          const job = await api.getParseJob(job_id)
-          setParseStatus((p) => ({ ...p, [file.id]: { jobId: job_id, ...job } }))
-          if (job.status === 'done' || job.status === 'failed') {
-            clearInterval(poll)
-            if (job.status === 'done') {
-              setToast(`Parsed ${job.parsed} paragraphs`)
-              fetchParsed()
-              fetchRegFiles()
+      if (res.job_id) {
+        setParseStatus((p) => ({ ...p, [file.id]: { jobId: res.job_id, status: 'running', parsed: 0, total: 0 } }))
+        const poll = setInterval(async () => {
+          try {
+            const job = await api.getParseJob(res.job_id)
+            setParseStatus((p) => ({ ...p, [file.id]: { jobId: res.job_id, ...job } }))
+            if (job.status === 'done' || job.status === 'failed') {
+              clearInterval(poll)
+              if (job.status === 'done') {
+                setToast(`Parsed ${job.parsed} items`)
+                fetchParsed()
+                fetchRegFiles()
+              } else {
+                setToast(`Parse failed: ${job.error || 'unknown error'}`)
+              }
             }
-          }
-        } catch { clearInterval(poll) }
-      }, 2000)
+          } catch { clearInterval(poll) }
+        }, 1000)
+      }
     } catch (err) { alert('Parse failed: ' + err.message) }
   }
 
@@ -423,15 +428,28 @@ function RegulationsTab({ sessionId, taxTypes }) {
   const handleTagSyllabus = async () => {
     setTagLoading(true)
     try {
-      const res = await api.tagSyllabus(sessionId, taxType || null)
-      if (res.tagged > 0) {
-        setToast(`Tagged ${res.tagged}/${res.total_items} items`)
-        fetchParsed()
+      const res = await api.tagSyllabusItems({ session_id: sessionId, tax_type: taxType || null })
+      if (res.job_id) {
+        const poll = setInterval(async () => {
+          try {
+            const d = await api.getParseJob(res.job_id)
+            if (d.status === 'done' || d.status === 'failed') {
+              clearInterval(poll)
+              setTagLoading(false)
+              if (d.status === 'done') {
+                setToast(`Tagged ${d.tagged}/${d.total} items`)
+                fetchParsed()
+              } else {
+                setToast('Tagging failed: ' + (d.error || 'unknown error'))
+              }
+            }
+          } catch { clearInterval(poll); setTagLoading(false) }
+        }, 1500)
       } else {
+        setTagLoading(false)
         setToast(res.message || 'No untagged items found')
       }
-    } catch (err) { setToast('Tagging failed: ' + err.message) }
-    finally { setTagLoading(false) }
+    } catch (err) { setTagLoading(false); setToast('Tagging failed: ' + err.message) }
   }
 
   const handleClearAll = async () => {
@@ -523,12 +541,20 @@ function RegulationsTab({ sessionId, taxTypes }) {
                 <span className="flex-1 text-xs">{f.file_name}</span>
                 <span className="text-xs text-gray-400">{f.sac_thue}</span>
                 {ps && ps.status === 'running' && (
-                  <span className="text-xs text-blue-600 animate-pulse">
-                    Parsing... {ps.parsed} ¶ (chunk {ps.chunk}/{ps.total_chunks})
-                  </span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-xs text-blue-600 animate-pulse">
+                      Parsing… {ps.parsed || 0}{ps.total > 0 ? `/${ps.total}` : ''} items
+                    </span>
+                    {ps.total > 0 && (
+                      <div className="w-32 bg-blue-100 rounded-full h-1">
+                        <div className="bg-blue-500 h-1 rounded-full transition-all"
+                          style={{ width: `${Math.round((ps.parsed / ps.total) * 100)}%` }} />
+                      </div>
+                    )}
+                  </div>
                 )}
                 {ps && ps.status === 'done' && (
-                  <span className="text-xs text-green-600">✓ {ps.parsed} paragraphs parsed</span>
+                  <span className="text-xs text-green-600">✓ {ps.parsed} items parsed</span>
                 )}
                 {ps && ps.status === 'failed' && (
                   <span className="text-xs text-red-500">✗ Parse failed</span>

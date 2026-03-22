@@ -12,6 +12,40 @@ router = APIRouter(prefix="/api/kb", tags=["kb"])
 logger = logging.getLogger(__name__)
 
 
+def _call_ai_openai(prompt: str, model: str, endpoint: str, api_key: str) -> str:
+    """Call Claudible (OpenAI-compatible) or Anthropic API."""
+    import urllib.request as ureq
+    is_claudible = 'claudible' in endpoint
+    payload = json.dumps({
+        'model': model, 'max_tokens': 3000,
+        'messages': [{'role': 'user', 'content': prompt}]
+    }).encode()
+    headers = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'OpenClaw/1.0',
+        **(
+            {'Authorization': f'Bearer {api_key}'} if is_claudible
+            else {'x-api-key': api_key, 'anthropic-version': '2023-06-01'}
+        )
+    }
+    req = ureq.Request(endpoint, data=payload, headers=headers)
+    with ureq.urlopen(req, timeout=60) as r:
+        d = json.loads(r.read())
+        return d['choices'][0]['message']['content'] if is_claudible else d['content'][0]['text']
+
+
+def _get_api_config_from_env():
+    """Returns (endpoint, api_key, provider) — Claudible first, Anthropic fallback."""
+    import os
+    claudible_key = os.environ.get('CLAUDIBLE_API_KEY', '').strip()
+    anthropic_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if claudible_key:
+        return 'https://claudible.io/v1/chat/completions', claudible_key, 'claudible'
+    elif anthropic_key:
+        return 'https://api.anthropic.com/v1/messages', anthropic_key, 'anthropic'
+    return None, None, None
+
+
 # --- Models ---
 
 class SyllabusItem(BaseModel):
@@ -471,6 +505,7 @@ def _split_into_article_chunks(text: str, max_chars: int = 8000) -> list:
 
 # In-memory job store for async parse jobs
 _parse_jobs: dict = {}
+_fast_parse_jobs: dict = {}
 
 
 def _run_parse_job(job_id: str, data: dict):
@@ -584,78 +619,81 @@ DOCUMENT CHUNK:
 
 
 @router.post("/regulations/parse-doc")
-def parse_regulation_doc(data: dict):
-    """Rule-based parse of a regulation document into kb_regulation_parsed rows (clears first)."""
-    import os
+def parse_regulation_doc(data: dict, background_tasks: BackgroundTasks):
+    """Rule-based fast parse — no AI calls, sub-clause granularity.
+    Returns job_id immediately; poll /api/kb/parse-jobs/{job_id} for progress."""
+    import os, uuid as _uuid
     from backend.config import DATA_DIR
     from backend.utils.rule_parser import extract_text_from_file as rule_extract, parse_regulation_text
 
     session_id = data['session_id']
-    tax_type = data['tax_type']
-    file_path = data['file_path']
-    doc_ref = data.get('doc_ref', '')
-    doc_slug = data.get('doc_slug', '')
+    tax_type   = data['tax_type']
+    file_path  = data['file_path']
+    doc_ref    = data.get('doc_ref', '')
+    doc_slug   = data.get('doc_slug', '')
 
     if not doc_slug:
         base = os.path.splitext(os.path.basename(file_path))[0]
-        doc_slug = base.replace(' ', '-').replace('_', '-')
+        doc_slug = re.sub(r'[^A-Za-z0-9]', '', base.replace(' ', '').replace('_', ''))[:20]
 
     source_file = os.path.basename(file_path)
+    full_path   = os.path.join(DATA_DIR, file_path) if not file_path.startswith('/') else file_path
 
-    # Clear existing rows for this file (idempotent re-parse)
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "DELETE FROM kb_regulation_parsed WHERE session_id = %s AND source_file = %s",
-            (session_id, source_file)
-        )
-        cleared = cur.rowcount
-
-    full_path = os.path.join(DATA_DIR, file_path) if not file_path.startswith('/') else file_path
     if not os.path.exists(full_path):
-        raise HTTPException(404, f"File not found: {file_path}")
+        raise HTTPException(404, f'File not found: {file_path}')
 
-    # Rule-based parse
-    try:
-        text = rule_extract(full_path)
-        items = parse_regulation_text(text, doc_slug, tax_type, doc_ref)
-    except Exception as e:
-        return {"error": str(e), "parsed": 0}
+    job_id = str(_uuid.uuid4())[:8]
+    _fast_parse_jobs[job_id] = {'status': 'running', 'parsed': 0, 'total': 0, 'cleared': 0, 'error': None}
 
-    # Insert into DB
-    inserted = 0
-    with get_db() as conn:
-        cur = conn.cursor()
-        for item in items:
-            cur.execute("""
-                INSERT INTO kb_regulation_parsed
-                  (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
-                   paragraph_text, syllabus_codes, tags, source_file, is_active)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
-                ON CONFLICT (session_id, reg_code) DO UPDATE SET
-                  paragraph_text = EXCLUDED.paragraph_text,
-                  doc_ref        = EXCLUDED.doc_ref,
-                  article_no     = EXCLUDED.article_no
-            """, (
-                session_id, item['tax_type'], item['reg_code'], item['doc_ref'],
-                item['article_no'], int(item['clause_no'] or 0),
-                item['paragraph_text'],
-                [],
-                item['title'][:200],
-                source_file,
-            ))
-            inserted += 1
+    def run():
+        try:
+            text  = rule_extract(full_path)
+            items = parse_regulation_text(text, doc_slug, tax_type, doc_ref)
+            _fast_parse_jobs[job_id]['total'] = len(items)
 
-    if cleared > 0:
-        logger.info(f"Re-parse: cleared {cleared} existing rows for {source_file}")
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    'DELETE FROM kb_regulation_parsed WHERE session_id = %s AND source_file = %s',
+                    (session_id, source_file)
+                )
+                _fast_parse_jobs[job_id]['cleared'] = cur.rowcount
 
-    return {
-        "parsed": inserted,
-        "cleared": cleared,
-        "re_parsed": cleared > 0,
-        "doc_slug": doc_slug,
-        "source": "rule-based",
-    }
+            inserted = 0
+            with get_db() as conn:
+                cur = conn.cursor()
+                for item in items:
+                    cur.execute("""
+                        INSERT INTO kb_regulation_parsed
+                          (session_id, tax_type, reg_code, doc_ref, article_no, paragraph_no,
+                           paragraph_text, syllabus_codes, tags, source_file, is_active)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, TRUE)
+                        ON CONFLICT (session_id, reg_code) DO UPDATE SET
+                          paragraph_text = EXCLUDED.paragraph_text,
+                          doc_ref        = EXCLUDED.doc_ref,
+                          article_no     = EXCLUDED.article_no,
+                          is_active      = TRUE
+                    """, (
+                        session_id, item['tax_type'], item['reg_code'], item['doc_ref'],
+                        item['article_no'],
+                        int(item['clause_no']) if item.get('clause_no') and str(item['clause_no']).isdigit() else 0,
+                        item['paragraph_text'],
+                        [],
+                        item['title'][:200] if item.get('title') else '',
+                        source_file,
+                    ))
+                    inserted += 1
+                    _fast_parse_jobs[job_id]['parsed'] = inserted
+
+            _fast_parse_jobs[job_id]['status'] = 'done'
+        except Exception as e:
+            import traceback
+            _fast_parse_jobs[job_id]['status'] = 'failed'
+            _fast_parse_jobs[job_id]['error']  = str(e)
+            logger.error(traceback.format_exc())
+
+    background_tasks.add_task(run)
+    return {'job_id': job_id, 'source': 'rule-based', 'file': source_file}
 
 
 @router.post("/regulations/parse-doc-async")
@@ -687,11 +725,63 @@ def parse_regulation_doc_async(data: dict, background_tasks: BackgroundTasks):
 
 
 @router.get("/regulations/parse-job/{job_id}")
-def get_parse_job(job_id: str):
+def get_parse_job_legacy(job_id: str):
     job = _parse_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     return job
+
+
+@router.get("/parse-jobs/{job_id}")
+def get_parse_job(job_id: str):
+    """Unified job poll — checks fast parse jobs first, then legacy AI parse jobs."""
+    job = _fast_parse_jobs.get(job_id) or _parse_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, f'Job {job_id} not found')
+    return job
+
+
+@router.get("/regulation-parsed")
+def list_regulation_parsed(
+    session_id: Optional[int] = None,
+    tax_type: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 2000,
+    offset: int = 0,
+):
+    """New endpoint with numeric sort and higher default limit."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        where = ['TRUE']
+        params: list = []
+        if session_id is not None:
+            where.append('r.session_id = %s'); params.append(session_id)
+        if tax_type:
+            where.append('r.tax_type = %s'); params.append(tax_type)
+        if search:
+            where.append('(r.reg_code ILIKE %s OR r.paragraph_text ILIKE %s OR r.tags ILIKE %s)')
+            params.extend([f'%{search}%', f'%{search}%', f'%{search}%'])
+        where_clause = ' AND '.join(where)
+
+        cur.execute(f"""
+            SELECT r.id, r.session_id, r.tax_type, r.reg_code, r.doc_ref,
+                   r.article_no, r.paragraph_no, r.paragraph_text,
+                   r.syllabus_codes, r.tags, r.source_file, r.is_active, r.created_at
+            FROM kb_regulation_parsed r
+            WHERE {where_clause}
+            ORDER BY
+              CAST(NULLIF(regexp_replace(r.reg_code, '.*Art(\\d+).*', '\\1'), r.reg_code) AS INTEGER) NULLS LAST,
+              CAST(NULLIF(regexp_replace(r.reg_code, '.*\\.([0-9]+)(\\.[a-z])?$', '\\1'), r.reg_code) AS INTEGER) NULLS LAST,
+              r.reg_code
+            LIMIT %s OFFSET %s
+        """, params + [limit, offset])
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+
+        cur.execute(f'SELECT COUNT(*) FROM kb_regulation_parsed r WHERE {where_clause}', params)
+        total = cur.fetchone()[0]
+
+    return {'items': [dict(zip(cols, r)) for r in rows], 'total': total, 'limit': limit, 'offset': offset}
 
 
 @router.get("/regulations/parsed")
@@ -1000,18 +1090,17 @@ def delete_tax_rate(item_id: int):
 # ============================================================
 
 @router.post("/regulations/tag-syllabus")
-def tag_syllabus_codes(data: dict):
-    """Use AI to suggest syllabus_codes for regulation items with empty codes. Runs in batches of 20."""
-    import json as _json
-    import re as _re
+def tag_syllabus_codes(data: dict, background_tasks: BackgroundTasks):
+    """AI-tag syllabus_codes for untagged regulation items. Returns job_id for polling."""
+    import uuid as _uuid
 
     session_id = data['session_id']
     tax_type   = data.get('tax_type')
     force      = data.get('force', False)
+    model      = data.get('model', 'claude-haiku-4.5')
 
     with get_db() as conn:
         cur = conn.cursor()
-        # Load syllabus for context
         cur.execute("""
             SELECT COALESCE(syllabus_code, section_code),
                    COALESCE(topic, section_title),
@@ -1025,80 +1114,74 @@ def tag_syllabus_codes(data: dict):
         syllabus_rows = cur.fetchall()
 
         if not syllabus_rows:
-            return {"error": "No syllabus loaded for this session", "tagged": 0}
+            raise HTTPException(400, 'No syllabus loaded for this session')
 
-        # Load untagged (or all if force=True) regulation items
-        if force:
-            cur.execute("""
-                SELECT id, reg_code, paragraph_text
-                FROM kb_regulation_parsed
-                WHERE session_id = %s AND (%s IS NULL OR tax_type = %s)
-                ORDER BY id
-            """, (session_id, tax_type, tax_type))
-        else:
-            cur.execute("""
-                SELECT id, reg_code, paragraph_text
-                FROM kb_regulation_parsed
-                WHERE session_id = %s
-                  AND (%s IS NULL OR tax_type = %s)
-                  AND (syllabus_codes IS NULL OR syllabus_codes = '{}')
-                ORDER BY id
-            """, (session_id, tax_type, tax_type))
+        filter_tagged = '' if force else "AND (syllabus_codes IS NULL OR syllabus_codes = '{}')"
+        cur.execute(f"""
+            SELECT id, reg_code, paragraph_text
+            FROM kb_regulation_parsed
+            WHERE session_id = %s AND (%s IS NULL OR tax_type = %s)
+              {filter_tagged}
+            ORDER BY id
+        """, (session_id, tax_type, tax_type))
         items = cur.fetchall()
 
     if not items:
-        return {"tagged": 0, "message": "No untagged items found"}
+        return {'job_id': None, 'message': 'No untagged items', 'tagged': 0}
+
+    job_id = str(_uuid.uuid4())[:8]
+    _fast_parse_jobs[job_id] = {'status': 'running', 'parsed': 0, 'total': len(items), 'tagged': 0}
 
     syllabus_list = '\n'.join(
-        f'- [{r[0]}] {r[1]}: {r[2][:80] if r[2] else ""}' for r in syllabus_rows[:80]
+        f'- [{r[0]}] {r[1]}: {(r[2] or "")[:80]}' for r in syllabus_rows[:80]
     )
 
-    tagged = 0
-    batch_size = 20
+    def run():
+        endpoint, key, _ = _get_api_config_from_env()
+        if not key:
+            _fast_parse_jobs[job_id]['status'] = 'failed'
+            _fast_parse_jobs[job_id]['error'] = 'No API key configured'
+            return
 
-    for i in range(0, len(items), batch_size):
-        batch = items[i:i + batch_size]
-        items_text = '\n\n'.join(f'[{item[1]}]\n{item[2][:300]}' for item in batch)
+        tagged = 0
+        batch_size = 20
+        for i in range(0, len(items), batch_size):
+            batch = items[i:i + batch_size]
+            items_text = '\n\n'.join(f'[{item[1]}]\n{(item[2] or "")[:300]}' for item in batch)
+            prompt = (
+                'Match each regulation item to relevant syllabus codes.\n\n'
+                'SYLLABUS:\n' + syllabus_list + '\n\n'
+                'ITEMS:\n' + items_text + '\n\n'
+                'Return ONLY JSON (no markdown): {"reg_code": ["A1a", "B2b"]}\n'
+                'Rules: 1-3 codes per item, only codes from list above, [] if no match'
+            )
+            try:
+                response = _call_ai_openai(prompt, model, endpoint, key)
+                brace_s = response.find('{')
+                brace_e = response.rfind('}')
+                if brace_s != -1 and brace_e != -1:
+                    result = json.loads(response[brace_s:brace_e + 1])
+                    with get_db() as conn:
+                        cur = conn.cursor()
+                        for item in batch:
+                            codes = result.get(item[1], [])
+                            if codes or force:
+                                cur.execute(
+                                    'UPDATE kb_regulation_parsed SET syllabus_codes = %s WHERE id = %s',
+                                    (codes, item[0])
+                                )
+                                if codes: tagged += 1
+            except Exception as e:
+                logger.warning(f'Tag batch {i // batch_size + 1} failed: {e}')
 
-        prompt = f"""You are an ACCA TX(VNM) exam analyst. For each regulation item below, identify which syllabus items it relates to.
+            _fast_parse_jobs[job_id]['parsed'] = min(i + batch_size, len(items))
+            _fast_parse_jobs[job_id]['tagged'] = tagged
 
-SYLLABUS ITEMS:
-{syllabus_list}
+        _fast_parse_jobs[job_id]['status'] = 'done'
+        _fast_parse_jobs[job_id]['tagged'] = tagged
 
-REGULATION ITEMS TO CLASSIFY:
-{items_text}
-
-Return ONLY valid JSON (no markdown), mapping reg_code to array of matching syllabus codes:
-{{
-  "CIT-Decree320-2025-Art9.1.a": ["B2a", "B2b"],
-  "CIT-Decree320-2025-Art23.1.a": ["C1a"]
-}}
-
-Rules:
-- Only include codes that ACTUALLY appear in the syllabus list above
-- If no good match, use empty array []
-- Be precise: only codes directly relevant to what the item governs
-"""
-        try:
-            result = call_ai(prompt, model_tier='fast')
-            json_match = _re.search(r'\{[\s\S]+\}', result['content'])
-            if json_match:
-                batch_result = _json.loads(json_match.group())
-                with get_db() as conn:
-                    cur = conn.cursor()
-                    for item in batch:
-                        codes = batch_result.get(item[1], [])
-                        if codes or force:
-                            cur.execute(
-                                "UPDATE kb_regulation_parsed SET syllabus_codes = %s WHERE id = %s",
-                                (codes, item[0])
-                            )
-                            tagged += 1
-        except Exception as e:
-            logger.warning(f"AI tagging batch {i // batch_size + 1} failed: {e}")
-            continue
-
-    return {"tagged": tagged, "total_items": len(items), "syllabus_count": len(syllabus_rows)}
+    background_tasks.add_task(run)
+    return {'job_id': job_id, 'total': len(items)}
 
 
 # ============================================================

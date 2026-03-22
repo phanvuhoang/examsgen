@@ -281,17 +281,30 @@ export const api = {
       body: JSON.stringify({ session_id: sessionId, tax_type: taxType }),
     }),
 
+  // Rule-based fast parse (returns job_id)
+  parseRegDoc: (data) =>
+    request('/kb/regulations/parse-doc', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Unified job poll (fast parse + legacy AI parse)
+  getParseJob: (jobId) => request(`/kb/parse-jobs/${jobId}`),
+
+  // Tag syllabus items via background job (returns job_id)
+  tagSyllabusItems: (body) =>
+    request('/kb/regulations/tag-syllabus', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Get regulation-parsed via new endpoint with numeric sort
+  getRegulationParsed: (queryString) =>
+    request(`/kb/regulation-parsed?${queryString}`),
+
   // v2: Get regulation files with paragraph counts
   getRegulationFiles: (params = {}) => {
     const q = new URLSearchParams(params)
     return request(`/kb/regulations/files?${q}`)
   },
 
-  // v2: Async parse job
+  // v2: Async AI parse job (legacy)
   parseRegulationDocAsync: (data) =>
     request('/kb/regulations/parse-doc-async', { method: 'POST', body: JSON.stringify(data) }),
-
-  getParseJob: (jobId) => request(`/kb/regulations/parse-job/${jobId}`),
 
   // v2: updated getParsedRegulations returns {total, items}
   getRegulationsParsed: (params = {}) => {
