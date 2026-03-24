@@ -85,7 +85,7 @@ def call_ai(prompt: str = None, model_tier: str = "strong", system_prompt: str =
                         "max_tokens": 8000,
                         "temperature": 0.7,
                     },
-                    timeout=120,
+                    timeout=300,
                 )
                 if response.status_code == 200:
                     data = response.json()
