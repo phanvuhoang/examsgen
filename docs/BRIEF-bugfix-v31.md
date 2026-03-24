@@ -1,56 +1,30 @@
-# ExamsGen — Bug Fix Brief v3.1
+# ExamsGen — Bug Fix Brief v3.2
 **Date:** March 2026
-**Priority:** High — 3 bugs affecting generation quality
+**Priority:** CRITICAL — all generation bugs trace to one root cause
 
 ---
 
-## Bug 1: Claudible timeout on large context
+## Root Cause (confirmed)
 
-**Root cause:** When regulations are large (150K chars), the full prompt sent to Claudible exceeds what can be processed within 300s. Need to reduce context size.
+ALL 3 symptoms below come from ONE bug — `_resolve_session_id()` returning session id=1 instead of session id=2:
 
-**Fix in `context_builder.py`:**
+| Symptom | Why |
+|---|---|
+| Output cites wrong regulations (e.g. Decree 132/2020 TP instead of CIT) | session 1 has no files → regulations="" → Claude uses internal knowledge |
+| Output doesn't follow sample format | session 1 has no sample files → sample="" |
+| Output has no syllabus tags | session 1 has no syllabus files → syllabus="" |
 
-Reduce `MAX_CONTEXT_CHARS` and `MAX_PER_REG_CHARS`:
+User uploaded all files (regulations, syllabus, rates, samples) into **session id=2**. But `_resolve_session_id()` resolves to session id=1 (the seeded default with no files).
 
-```python
-# Change these constants:
-MAX_CONTEXT_CHARS = 300_000    # was 600_000 — keep within ~75K tokens for Claudible
-MAX_PER_REG_CHARS = 80_000     # was 150_000 — cap each regulation file
-```
-
-**Fix in `ai_provider.py`:**
-
-Reduce `max_tokens` per question type — MCQ doesn't need 8000 tokens:
-
-```python
-# Add a helper to get max_tokens per model_tier:
-MAX_TOKENS_MAP = {
-    "fast": 4000,    # MCQ — shorter output
-    "strong": 6000,  # Scenario/Longform — longer output
-}
-
-# In the requests.post call, replace hardcoded 8000:
-json={
-    "model": model,
-    "messages": messages,
-    "max_tokens": MAX_TOKENS_MAP.get(model_tier, 4000),
-    "temperature": 0.7,
-},
-```
+**Verified:** `session_files` table has 30 rows all with `session_id=2`. Session id=1 has zero files.
 
 ---
 
-## Bug 2: App uses old regulations instead of uploaded files
+## Fix 1 (CRITICAL): `_resolve_session_id()` in `routes/generate.py`
 
-**Root cause:** There are TWO session systems in `/app/data/`:
-- OLD (legacy): `/app/data/sessions/june_2026/regulations/...` — hardcoded files from old codebase
-- NEW (current): `/app/data/sessions/2/regulation/...` — files uploaded by user via UI
+**Current behavior:** Falls back to `is_default=TRUE` session, which is session 1 (empty).
 
-The `_resolve_session_id()` function may be resolving to session id=1 (the seeded default) instead of session id=2 (where user uploaded files).
-
-**Investigation needed:** Check what `_resolve_session_id()` returns and what session is actually `is_default=TRUE` in the DB.
-
-**Fix in `routes/generate.py` — `_resolve_session_id()`:**
+**Fix:** When default session has no files, fall back to most recent session that has files:
 
 ```python
 def _resolve_session_id(session_id: int = None) -> int | None:
@@ -58,132 +32,166 @@ def _resolve_session_id(session_id: int = None) -> int | None:
         cur = conn.cursor()
         if session_id:
             cur.execute("SELECT id FROM exam_sessions WHERE id = %s", (session_id,))
-        else:
-            # Try default session first, then fall back to most recent
-            cur.execute("""
-                SELECT id FROM exam_sessions
-                WHERE is_default = TRUE
-                ORDER BY id DESC
-                LIMIT 1
-            """)
+            row = cur.fetchone()
+            if row:
+                return row[0]
+
+        # Try default session
+        cur.execute("SELECT id FROM exam_sessions WHERE is_default = TRUE ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+        if row:
+            default_id = row[0]
+            # Verify it has files
+            cur.execute("SELECT COUNT(*) FROM session_files WHERE session_id = %s AND is_active = TRUE", (default_id,))
+            count = cur.fetchone()[0]
+            if count > 0:
+                return default_id
+
+        # Default session has no files — use most recent session WITH files
+        cur.execute("""
+            SELECT DISTINCT sf.session_id
+            FROM session_files sf
+            WHERE sf.is_active = TRUE
+            ORDER BY sf.session_id DESC
+            LIMIT 1
+        """)
         row = cur.fetchone()
         if row:
             return row[0]
-        # Last resort: use most recently created session
+
+        # Absolute last resort: most recently created session
         cur.execute("SELECT id FROM exam_sessions ORDER BY id DESC LIMIT 1")
         row = cur.fetchone()
         return row[0] if row else None
 ```
 
-**Also fix in `routes/generate.py`:** Log the resolved session_id clearly so it's visible in app logs:
+**Also:** When session_id resolves successfully, update it to be the default so future requests don't need to fall back:
 
 ```python
-session_id = _resolve_session_id(req.session_id)
-logger.info(f"Generating MCQ: session_id={session_id}, sac_thue={req.sac_thue}")
-if not session_id:
-    raise HTTPException(400, "No exam session configured. Please create a session first.")
-
-ctx = build_context(session_id, req.sac_thue, "MCQ")
-logger.info(f"Context built: regulations={len(ctx['regulations'])} chars, syllabus={len(ctx['syllabus'])} chars, sample={len(ctx['sample'])} chars, rates={len(ctx['tax_rates'])} chars")
+# In startup/seed — if session 1 is empty and session 2 has files, make session 2 the default
+def fix_default_session():
+    with get_db() as conn:
+        cur = conn.cursor()
+        # Find session with most files
+        cur.execute("""
+            SELECT session_id, COUNT(*) as file_count
+            FROM session_files
+            WHERE is_active = TRUE
+            GROUP BY session_id
+            ORDER BY file_count DESC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        if row:
+            session_id = row[0]
+            cur.execute("UPDATE exam_sessions SET is_default = FALSE WHERE is_default = TRUE")
+            cur.execute("UPDATE exam_sessions SET is_default = TRUE WHERE id = %s", (session_id,))
+            logger.info(f"Set session {session_id} as default (has {row[1]} files)")
 ```
 
-This logging will confirm whether the right session/files are being loaded.
+Call `fix_default_session()` in the `startup()` event in `main.py`.
 
-**Also:** Delete or ignore the old legacy data at `/app/data/sessions/june_2026/` — it is confusing and no longer used. Add to startup:
+---
+
+## Fix 2: Add diagnostic logging to `build_context()` in `context_builder.py`
+
+So we can confirm files are loaded correctly after the fix:
 
 ```python
-# In seed.py or startup — ensure default session points to id with actual uploaded files
-# Do NOT create a duplicate session 1 that has no files
+def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
+    logger.info(f"build_context: session_id={session_id}, sac_thue={sac_thue}, question_type={question_type}")
+
+    # ... existing code ...
+
+    logger.info(f"  regulations: {len(reg_files)} files — {[f['name'] for f in reg_files]}")
+    logger.info(f"  syllabus: {len(syllabus_files)} files — {[f['name'] for f in syllabus_files]}")
+    logger.info(f"  sample: {len(sample_files)} files — {[f['name'] for f in sample_files]}")
+    logger.info(f"  rates: {len(rates_files)} files — {[f['name'] for f in rates_files]}")
+    logger.info(f"  total context chars: regulations={len(regulations)}, syllabus={len(syllabus)}, sample={len(sample)}, rates={len(tax_rates)}")
+
+    return {
+        "tax_rates": tax_rates,
+        "syllabus": syllabus,
+        "regulations": regulations,
+        "sample": sample,
+    }
 ```
 
 ---
 
-## Bug 3: Sample file not used when generating (wrong tax type match)
+## Fix 3: Reduce context size to fix Claudible timeout
 
-**Root cause:** User uploaded `Sample_MCQ_CIT.docx` tagged as `tax_type='CIT'`. When generating **PIT** MCQs, `_load_files(session_id, 'sample', tax_type='PIT', exam_type='MCQ')` returns empty — no PIT sample exists yet → `sample = ""` → Claude generates from internal knowledge without following format.
+**Problem:** MAX_CONTEXT_CHARS=600K → prompt too large → Claudible times out even with 300s limit.
 
-**Fix in `context_builder.py` — `build_context()`:**
-
-Add fallback: if no sample found for specific tax_type, load ANY sample of matching exam_type as style reference:
+**Fix in `context_builder.py`:**
 
 ```python
-# 3. Sample question — try specific tax type first, then fall back to any sample of same exam_type
-sample_files = _load_files(session_id, "sample", tax_type=sac_thue, exam_type=exam_type)
-if not sample_files:
-    # Fallback: use any available sample of the same exam_type for style reference
-    sample_files = _load_files(session_id, "sample", exam_type=exam_type)
-    if sample_files:
-        logger.info(f"No {sac_thue} sample found — using {sample_files[0]['tax_type']} sample as style reference")
+MAX_CONTEXT_CHARS = 300_000    # reduce from 600_000
+MAX_PER_REG_CHARS = 80_000     # reduce from 150_000
 ```
 
-**Additionally:** Update the prompt to explicitly tell Claude when a cross-tax sample is being used:
+**Fix in `ai_provider.py`:** Dynamic max_tokens instead of hardcoded 8000:
 
-In `context_builder.py`, return metadata about the sample:
+```python
+# Replace hardcoded "max_tokens": 8000 with:
+MAX_TOKENS_BY_TIER = {
+    "fast": 3000,    # MCQ — shorter output needed
+    "strong": 5000,  # Scenario/Longform — longer output
+}
+
+# In requests.post:
+json={
+    "model": model,
+    "messages": messages,
+    "max_tokens": MAX_TOKENS_BY_TIER.get(model_tier, 3000),
+    "temperature": 0.7,
+},
+```
+
+---
+
+## Fix 4: Add `{sample_note}` to prompts when sample is from different tax type (minor)
+
+In `context_builder.py`, after loading sample_files, detect if fallback was used:
 
 ```python
 sample_note = ""
-if sample_files and sample_files[0].get("tax_type") != sac_thue:
-    sample_note = f"[NOTE: Style reference below is from {sample_files[0].get('tax_type')} questions — adapt the FORMAT and STRUCTURE only, not the tax content]"
+if sample_files:
+    loaded_tax_type = sample_files[0].get("tax_type", sac_thue)
+    if loaded_tax_type != sac_thue:
+        sample_note = f"[STYLE REFERENCE NOTE: The sample below is from {loaded_tax_type} — replicate FORMAT and STRUCTURE only, not the tax content]"
 ```
 
-Return this in the context dict:
-```python
-return {
-    "tax_rates": tax_rates,
-    "syllabus": syllabus,
-    "regulations": regulations,
-    "sample": sample,
-    "sample_note": sample_note,   # NEW field
-}
+Return in context dict and inject into all 3 prompts (MCQ/Scenario/Longform) just before `{sample}`:
+
 ```
-
-Update `MCQ_PROMPT` in `prompts.py` to include sample_note:
-
-```python
-MCQ_PROMPT = """Generate {count} MCQ question(s) for Part 1 of ACCA TX(VNM).
-...
 SAMPLE QUESTIONS — replicate this format and difficulty EXACTLY:
 {sample_note}
 {sample}
-...
 ```
 
-Apply same sample fallback to `SCENARIO_PROMPT` and `LONGFORM_PROMPT`.
+Update `MCQ_PROMPT`, `SCENARIO_PROMPT`, `LONGFORM_PROMPT` in `prompts.py` to include `{sample_note}` placeholder.
+Update `generate_mcq`, `generate_scenario`, `generate_longform` in `routes/generate.py` to pass `sample_note=ctx.get("sample_note", "")`.
 
 ---
 
-## Bug 4 (bonus): Output doesn't cite uploaded regulations — only uses internal knowledge
+## Summary
 
-**Root cause:** Looking at the generated output, it cites `Decree 132/2020` and `Circular 96/2015` — these are **NOT in the uploaded regulations for session 2**. This confirms Bug 2 — regulations from session_files are NOT being loaded into the prompt.
+| Priority | File | Change |
+|---|---|---|
+| 🔴 CRITICAL | `routes/generate.py` | Fix `_resolve_session_id()` to find session with files |
+| 🔴 CRITICAL | `main.py` | Call `fix_default_session()` at startup |
+| 🟡 HIGH | `context_builder.py` | Reduce MAX_CONTEXT_CHARS to 300K, add logging, add sample_note |
+| 🟡 HIGH | `ai_provider.py` | Dynamic max_tokens (3K fast, 5K strong) |
+| 🟢 MINOR | `prompts.py` | Add `{sample_note}` placeholder |
 
-**Additional verification step:** Add to `build_context()`:
+## Testing checklist after fix
 
-```python
-logger.info(f"Loaded regulations for {sac_thue}: {[f['name'] for f in reg_files]}")
-logger.info(f"Loaded samples for {sac_thue}/{exam_type}: {[f['name'] for f in sample_files]}")
-```
-
-Check app logs after generation to confirm which files are actually loaded. If `reg_files = []`, the session_id bug is confirmed.
-
----
-
-## Summary of changes
-
-| File | Change |
-|---|---|
-| `backend/context_builder.py` | Reduce MAX_CONTEXT_CHARS to 300K, MAX_PER_REG_CHARS to 80K; add sample fallback; add logging |
-| `backend/ai_provider.py` | Dynamic max_tokens per model_tier (4000 fast, 6000 strong) |
-| `backend/routes/generate.py` | Fix `_resolve_session_id()` to use most recent session; add logging |
-| `backend/prompts.py` | Add `{sample_note}` placeholder to MCQ/Scenario/Longform prompts |
-
----
-
-## Testing after fix
-
-After deploying, generate a PIT MCQ and check:
-1. Logs show `session_id=2` (not 1)
-2. Logs show `regulations=Reg_PIT_VBHN02` loaded
-3. Output cites articles from `Reg_PIT_VBHN02` (not Decree 132/2020 which is TP)
-4. Output follows MCQ format from sample file
-5. Output includes `syllabus_codes` field in JSON
-6. Claudible completes within 300s with reduced context
+Generate 1 CIT MCQ and verify in logs:
+- [ ] `build_context: session_id=2` (not 1)
+- [ ] `regulations: 3 files — ['Reg CIT Law67 2025', 'Reg CIT Decree320 2025', 'Reg CIT FCT Circular20 2026']`
+- [ ] `syllabus: 1 files — ['Syllabus CIT D27']`
+- [ ] `sample: 1 files — ['Sample MCQ CIT']`
+- [ ] Output cites articles from Decree 320/2025 or Law 67/2025 (not Decree 132/2020)
+- [ ] Output JSON has `syllabus_codes` field populated
+- [ ] Claudible completes without timeout
