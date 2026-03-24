@@ -114,6 +114,9 @@ export const api = {
   toggleSessionFile: (sessionId, fileId) =>
     request(`/sessions/${sessionId}/files/${fileId}/toggle`, { method: 'PUT' }),
 
+  reparseSampleFile: (sessionId, fileId) =>
+    request(`/sessions/${sessionId}/files/${fileId}/reparse`, { method: 'POST' }),
+
   carryForward: (sessionId, fromSessionId) =>
     request(`/sessions/${sessionId}/carry-forward`, {
       method: 'POST',

@@ -156,6 +156,8 @@ async def upload_file(
     if file_type == "sample":
         from backend.document_extractor import parse_sample_examples
         full_path = os.path.join(DATA_DIR, rel_path)
+        # Small delay to ensure file is fully flushed to disk
+        import time; time.sleep(0.1)
         examples = parse_sample_examples(full_path)
         if examples:
             with get_db() as conn:
@@ -167,8 +169,10 @@ async def upload_file(
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """, (session_id, file_id, ex["example_number"], ex["title"], ex["content"], tax_type, exam_type))
             logger.info(f"Parsed {len(examples)} examples from {file.filename}")
+        else:
+            logger.warning(f"No examples found in {file.filename} — check 'Example N:' headings")
 
-    return {"id": file_id, "file_name": file.filename, "file_path": rel_path}
+    return {"id": file_id, "file_name": file.filename, "file_path": rel_path, "examples_parsed": len(examples) if file_type == "sample" else 0}
 
 
 @router.delete("/{session_id}/files/{file_id}")
@@ -180,6 +184,8 @@ def delete_file(session_id: int, file_id: int):
         if not row:
             raise HTTPException(404, "File not found")
         file_path = row[0]
+        # Delete parsed examples first (FK cascade may not be set)
+        cur.execute("DELETE FROM sample_examples WHERE file_id = %s", (file_id,))
         cur.execute("DELETE FROM session_files WHERE id = %s", (file_id,))
     if file_path:
         full = os.path.join(DATA_DIR, file_path) if not os.path.isabs(file_path) else file_path
@@ -274,6 +280,37 @@ def list_sample_examples(session_id: int, sac_thue: str = None, exam_type: str =
         }
         for r in rows
     ]
+
+
+@router.post("/{session_id}/files/{file_id}/reparse")
+def reparse_sample_file(session_id: int, file_id: int):
+    """Re-parse a sample file into examples. Useful when file was uploaded before fix or after editing."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT file_path, tax_type, exam_type FROM session_files WHERE id = %s AND session_id = %s AND file_type = 'sample'",
+            (file_id, session_id)
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Sample file not found")
+
+    rel_path, tax_type, exam_type = row
+    full_path = os.path.join(DATA_DIR, rel_path) if not os.path.isabs(rel_path) else rel_path
+
+    from backend.document_extractor import parse_sample_examples
+    examples = parse_sample_examples(full_path)
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM sample_examples WHERE file_id = %s", (file_id,))
+        for ex in examples:
+            cur.execute("""
+                INSERT INTO sample_examples (session_id, file_id, example_number, title, content, tax_type, exam_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (session_id, file_id, ex["example_number"], ex["title"], ex["content"], tax_type, exam_type))
+
+    return {"ok": True, "examples_parsed": len(examples)}
 
 
 @router.get("/{session_id}/examples/{example_id}/full")

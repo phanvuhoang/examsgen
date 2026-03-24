@@ -72,8 +72,9 @@ const FILE_TABS = [
   { key: 'sample', label: 'Sample Questions', desc: 'Past exam sample questions (.docx)' },
 ]
 
-function FileRow({ file, sessionId, onDelete, onToggle }) {
+function FileRow({ file, sessionId, onDelete, onToggle, onReparsed }) {
   const [deleting, setDeleting] = useState(false)
+  const [reparsing, setReparsing] = useState(false)
 
   const handleDelete = async () => {
     if (!confirm(`Delete "${file.display_name || file.file_name}"?`)) return
@@ -94,6 +95,19 @@ function FileRow({ file, sessionId, onDelete, onToggle }) {
       onToggle(file.id, res.is_active)
     } catch (err) {
       alert('Toggle failed: ' + err.message)
+    }
+  }
+
+  const handleReparse = async () => {
+    setReparsing(true)
+    try {
+      const res = await api.reparseSampleFile(sessionId, file.id)
+      if (onReparsed) onReparsed(file.id)
+      alert(`Re-parsed: ${res.examples_parsed} examples found`)
+    } catch (err) {
+      alert('Re-parse failed: ' + err.message)
+    } finally {
+      setReparsing(false)
     }
   }
 
@@ -123,6 +137,16 @@ function FileRow({ file, sessionId, onDelete, onToggle }) {
       >
         {file.is_active ? 'Active' : 'Inactive'}
       </button>
+      {file.file_type === 'sample' && (
+        <button
+          onClick={handleReparse}
+          disabled={reparsing}
+          title="Re-parse examples from this file"
+          className="text-xs px-2 py-1 rounded border bg-purple-50 border-purple-200 text-purple-600 hover:bg-purple-100 disabled:opacity-40"
+        >
+          {reparsing ? '...' : '↺'}
+        </button>
+      )}
       <button
         onClick={handleDelete}
         disabled={deleting}
@@ -378,7 +402,7 @@ export default function Documents() {
                   </div>
                   <div className="divide-y">
                     {filesByTaxType[tt].map((f) => (
-                      <FileRow key={f.id} file={f} sessionId={sessionId} onDelete={handleDelete} onToggle={handleToggle} />
+                      <FileRow key={f.id} file={f} sessionId={sessionId} onDelete={handleDelete} onToggle={handleToggle} onReparsed={() => { setExamples([]); api.getSampleExamples(sessionId).then(setExamples).catch(()=>{}) }} />
                     ))}
                   </div>
                 </div>
@@ -390,7 +414,7 @@ export default function Documents() {
                   </div>
                   <div className="divide-y">
                     {filesByTaxType['ALL'].map((f) => (
-                      <FileRow key={f.id} file={f} sessionId={sessionId} onDelete={handleDelete} onToggle={handleToggle} />
+                      <FileRow key={f.id} file={f} sessionId={sessionId} onDelete={handleDelete} onToggle={handleToggle} onReparsed={() => { setExamples([]); api.getSampleExamples(sessionId).then(setExamples).catch(()=>{}) }} />
                     ))}
                   </div>
                 </div>
@@ -400,7 +424,7 @@ export default function Documents() {
             // Other tabs: flat list
             <div className="bg-white rounded-xl border divide-y">
               {files.map((f) => (
-                <FileRow key={f.id} file={f} sessionId={sessionId} onDelete={handleDelete} onToggle={handleToggle} />
+                <FileRow key={f.id} file={f} sessionId={sessionId} onDelete={handleDelete} onToggle={handleToggle} onReparsed={() => { setExamples([]); api.getSampleExamples(sessionId).then(setExamples).catch(()=>{}) }} />
               ))}
             </div>
           )}
