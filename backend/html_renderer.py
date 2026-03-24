@@ -38,6 +38,19 @@ def _render_mcq(content: dict) -> str:
 
         if q.get("regulation_refs"):
             html_parts.append(f'<p class="refs"><em>References: {", ".join(q["regulation_refs"])}</em></p>')
+        syllabus_codes = q.get("syllabus_codes", [])
+        if syllabus_codes:
+            codes_html = "".join(
+                f'<span style="display:inline-block;background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;'
+                f'border-radius:4px;padding:2px 8px;font-size:11px;margin:2px 3px 2px 0;font-weight:600;">'
+                f'{code}</span>'
+                for code in syllabus_codes
+            )
+            html_parts.append(
+                f'<div style="margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;">'
+                f'<span style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;'
+                f'letter-spacing:0.05em;">Syllabus codes tested: </span>{codes_html}</div>'
+            )
         html_parts.append("</details></div>")
 
     return "\n".join(html_parts)
@@ -70,6 +83,23 @@ def _render_scenario(content: dict) -> str:
         for ms in sq.get("marking_scheme", []):
             html_parts.append(f'<div class="mark-point">• {ms.get("point", "")} [{ms.get("mark", "")} mark(s)]</div>')
         html_parts.append("</div>")
+
+    reg_refs = content.get("regulation_refs", [])
+    if reg_refs:
+        html_parts.append(f'<p class="refs"><em>References: {", ".join(reg_refs)}</em></p>')
+    syllabus_codes = content.get("syllabus_codes", [])
+    if syllabus_codes:
+        codes_html = "".join(
+            f'<span style="display:inline-block;background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;'
+            f'border-radius:4px;padding:2px 8px;font-size:11px;margin:2px 3px 2px 0;font-weight:600;">'
+            f'{code}</span>'
+            for code in syllabus_codes
+        )
+        html_parts.append(
+            f'<div style="margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;">'
+            f'<span style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;'
+            f'letter-spacing:0.05em;">Syllabus codes tested: </span>{codes_html}</div>'
+        )
     html_parts.append("</details></div>")
 
     return "\n".join(html_parts)

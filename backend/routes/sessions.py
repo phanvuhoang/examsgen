@@ -227,6 +227,32 @@ def carry_forward(session_id: int, data: dict):
     return {"ok": True, "copied": copied}
 
 
+@router.get("/{session_id}/samples/preview")
+def get_sample_previews(session_id: int, sac_thue: str, exam_type: str = "MCQ"):
+    """Return list of sample files with first 400 chars of text content as preview."""
+    from backend.context_builder import _load_files
+    from backend.document_extractor import extract_text
+
+    files = _load_files(session_id, "sample", tax_type=sac_thue, exam_type=exam_type)
+    result = []
+    for f in files:
+        file_path = f["path"]
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(DATA_DIR, file_path)
+        try:
+            text = extract_text(file_path)
+            preview = text[:400].strip()
+        except Exception:
+            preview = ""
+        result.append({
+            "name": f["name"] or f["path"],
+            "tax_type": f["tax_type"],
+            "exam_type": f["exam_type"],
+            "preview": preview,
+        })
+    return result
+
+
 @router.get("/{session_id}/stats")
 def session_stats(session_id: int):
     with get_db() as conn:

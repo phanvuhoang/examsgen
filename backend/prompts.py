@@ -36,6 +36,7 @@ REQUIREMENTS:
 - Correct answer includes full step-by-step working
 - Each distractor includes a brief explanation of why it is wrong
 - Cite specific Article and Regulation in the correct answer
+- In the correct answer explanation, include a line: "Syllabus items tested: [list codes and topic names, e.g. CIT-2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
 - At the end of each question, list: Syllabus codes tested: [e.g. CIT-2d, CIT-2e]
 
 OUTPUT FORMAT — return ONLY valid JSON, no markdown, no extra text:
@@ -78,6 +79,7 @@ STRUCTURE:
 - Marks per sub-question shown in brackets, summing to exactly {marks}
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include full marking scheme at the end
+- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. CIT-2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
 
 TAX RATES:
 {tax_rates}
@@ -133,6 +135,7 @@ STRUCTURE:
 - Mix of CALCULATION and WRITTEN EXPLANATION sub-questions
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include detailed marking scheme showing each individual mark
+- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. CIT-2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
 
 TAX RATES:
 {tax_rates}

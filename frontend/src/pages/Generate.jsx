@@ -24,6 +24,7 @@ export default function Generate() {
   const [showCustom, setShowCustom] = useState(false)
   const [referenceId, setReferenceId] = useState('')
   const [referenceOptions, setReferenceOptions] = useState([])
+  const [samplePreviews, setSamplePreviews] = useState([])
 
   const [sessions, setSessions] = useState([])
   const [sessionId, setSessionId] = useState(null)
@@ -67,6 +68,14 @@ export default function Generate() {
         .catch(() => setReferenceOptions([]))
     }
   }, [type, sac_thue])
+
+  useEffect(() => {
+    if (!sessionId || !type || !sac_thue) return
+    const examTypeMap = { mcq: 'MCQ', scenario: 'Scenario', longform: 'Longform' }
+    api.getSamplePreviews({ session_id: sessionId, sac_thue, exam_type: examTypeMap[type] || 'MCQ' })
+      .then(setSamplePreviews)
+      .catch(() => setSamplePreviews([]))
+  }, [sessionId, type, sac_thue])
 
   const parseSyllabusCodes = () => {
     if (!syllabusCodes.trim()) return null
@@ -291,14 +300,6 @@ export default function Generate() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1">Exam Session Label</label>
-              <input value={examSession} onChange={(e) => setExamSession(e.target.value)}
-                placeholder="e.g. Jun2026"
-                className="w-full border rounded-lg px-3 py-2" />
-            </div>
-
-            {/* Syllabus codes */}
-            <div className="col-span-2">
               <label className="block text-sm font-medium mb-1">Syllabus Codes (optional)</label>
               <input
                 value={syllabusCodes}
@@ -327,19 +328,75 @@ export default function Generate() {
               <div className="mt-3 space-y-3">
                 {referenceOptions.length > 0 && (
                   <div>
-                    <label className="block text-sm font-medium mb-1">Base on question from bank</label>
-                    <select
-                      value={referenceId}
-                      onChange={(e) => setReferenceId(e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm"
-                    >
-                      <option value="">— None —</option>
+                    <label className="block text-sm font-medium mb-2">Based on question from bank</label>
+                    <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
+                      <div
+                        onClick={() => setReferenceId('')}
+                        className={`cursor-pointer rounded-lg px-3 py-2 text-sm border transition-all ${
+                          referenceId === '' ? 'border-brand-500 bg-brand-50' : 'border-transparent hover:bg-white hover:border-gray-200'
+                        }`}
+                      >
+                        <span className="text-gray-400 italic">— None —</span>
+                      </div>
                       {referenceOptions.map((q) => (
-                        <option key={q.id} value={q.id}>{q.label}</option>
+                        <div
+                          key={q.id}
+                          onClick={() => setReferenceId(String(q.id))}
+                          className={`cursor-pointer rounded-lg px-3 py-2 text-sm border transition-all ${
+                            referenceId === String(q.id)
+                              ? 'border-brand-500 bg-brand-50'
+                              : 'border-transparent hover:bg-white hover:border-gray-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded">
+                              {q.question_type?.replace('_10', '').replace('_15', '')}
+                            </span>
+                            <span className="bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5 rounded">
+                              {q.sac_thue}
+                            </span>
+                            <span className="text-xs text-gray-400 ml-auto">{q.created_at}</span>
+                          </div>
+                          {q.snippet && (
+                            <p className="text-xs text-gray-600 truncate">{q.snippet}</p>
+                          )}
+                        </div>
                       ))}
-                    </select>
+                    </div>
                   </div>
                 )}
+
+                {samplePreviews.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Sample Examples in Knowledge Base
+                      <span className="text-xs text-gray-400 font-normal ml-2">
+                        ({sac_thue} · {type?.toUpperCase()})
+                      </span>
+                    </label>
+                    <div className="space-y-2">
+                      {samplePreviews.map((s, i) => (
+                        <div key={i} className="border rounded-lg p-3 bg-gray-50 text-xs">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-semibold text-gray-700">{s.name}</span>
+                            <span className="bg-orange-100 text-orange-700 font-semibold px-2 py-0.5 rounded">
+                              {s.exam_type}
+                            </span>
+                          </div>
+                          {s.preview && (
+                            <p className="text-gray-500 leading-relaxed whitespace-pre-wrap font-mono text-[11px] max-h-24 overflow-y-auto">
+                              {s.preview}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">
+                      These examples are automatically used as style references when generating.
+                    </p>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium mb-1">Paste a sample or describe what you want</label>
                   <textarea

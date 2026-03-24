@@ -120,6 +120,11 @@ export const api = {
       body: JSON.stringify({ from_session_id: fromSessionId }),
     }),
 
+  getSamplePreviews: ({ session_id, sac_thue, exam_type }) => {
+    const params = new URLSearchParams({ sac_thue, exam_type })
+    return request(`/sessions/${session_id}/samples/preview?${params}`)
+  },
+
   // Export
   exportWord: (questionIds) =>
     request('/export/word', {

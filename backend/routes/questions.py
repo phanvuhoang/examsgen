@@ -155,17 +155,18 @@ def get_questions_for_reference(
         try:
             cj = json.loads(content) if isinstance(content, str) else content
             if q_type == "MCQ":
-                count = len(cj.get("questions", []))
-                snippet = f"{count} questions"
+                qs = cj.get("questions", [])
+                first_scenario = qs[0].get("scenario", "") if qs else ""
+                snippet = first_scenario[:100] if first_scenario else f"{len(qs)} questions"
             else:
                 scenario = cj.get("scenario", "")
-                snippet = scenario[:60] + "..." if len(scenario) > 60 else scenario
+                snippet = scenario[:100] + "..." if len(scenario) > 100 else scenario
         except Exception:
             pass
 
         label = f"{q_num or q_type} {q_sac}"
         if snippet:
-            label += f" — {snippet}"
+            label += f" — {snippet[:60]}{'...' if len(snippet) > 60 else ''}"
         label += f" ({date_str})"
 
         results.append({
@@ -173,7 +174,8 @@ def get_questions_for_reference(
             "label": label,
             "question_type": q_type,
             "sac_thue": q_sac,
-            "created_at": created.isoformat() if created else None,
+            "snippet": snippet,
+            "created_at": date_str,
         })
 
     return results
