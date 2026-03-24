@@ -18,7 +18,7 @@ export default function Generate() {
   const [industry, setIndustry] = useState('')
   const [difficulty, setDifficulty] = useState('standard')
   const [modelTier, setModelTier] = useState('fast')
-  const [provider, setProvider] = useState('')
+  const [provider, setProvider] = useState('anthropic')
   const [syllabusCodes, setSyllabusCodes] = useState('')  // simple text input e.g. "CIT-2d, CIT-2n"
   const [customInstructions, setCustomInstructions] = useState('')
   const [showCustom, setShowCustom] = useState(false)
@@ -292,14 +292,24 @@ export default function Generate() {
                 setProvider(p === 'auto' ? '' : p)
                 setModelTier(t)
               }} className="w-full border rounded-lg px-3 py-2">
-                <option value="auto|fast">Auto — Sonnet (fast)</option>
-                <option value="auto|strong">Auto — Opus (best)</option>
-                <option value="claudible|fast">Claudible — Sonnet</option>
-                <option value="claudible|strong">Claudible — Opus</option>
-                <option value="anthropic|fast">Anthropic — Sonnet</option>
-                <option value="anthropic|strong">Anthropic — Opus</option>
-                <option value="openai|fast">OpenAI — Fast</option>
-                <option value="openai|strong">OpenAI — Strong</option>
+                <optgroup label="── Anthropic (direct) ──">
+                  <option value="anthropic|fast">Anthropic — Sonnet 4.5 ⭐ Default</option>
+                  <option value="anthropic|haiku">Anthropic — Haiku 4.5 (fast/cheap)</option>
+                  <option value="anthropic|strong">Anthropic — Sonnet 4.5 (strong)</option>
+                </optgroup>
+                <optgroup label="── Claudible (proxy) ──">
+                  <option value="claudible|fast">Claudible — Sonnet 4.6</option>
+                  <option value="claudible|haiku">Claudible — Haiku 4.5 (fast/cheap)</option>
+                  <option value="claudible|strong">Claudible — Sonnet 4.6 (strong)</option>
+                </optgroup>
+                <optgroup label="── Auto fallback ──">
+                  <option value="auto|fast">Auto — Sonnet (fast)</option>
+                  <option value="auto|strong">Auto — Sonnet/Opus (best)</option>
+                </optgroup>
+                <optgroup label="── OpenAI ──">
+                  <option value="openai|fast">OpenAI — GPT-4o mini</option>
+                  <option value="openai|strong">OpenAI — GPT-4o</option>
+                </optgroup>
               </select>
             </div>
 

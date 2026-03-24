@@ -4,13 +4,13 @@ import os
 # AI — Primary (Claudible, OpenAI-compatible)
 CLAUDIBLE_BASE_URL = os.getenv("CLAUDIBLE_BASE_URL", "https://claudible.io/v1")
 CLAUDIBLE_API_KEY = os.getenv("CLAUDIBLE_API_KEY", "")
-CLAUDIBLE_MODEL_STRONG = os.getenv("CLAUDIBLE_MODEL_STRONG", "claude-opus-4.6")
-CLAUDIBLE_MODEL_FAST = os.getenv("CLAUDIBLE_MODEL_FAST", "claude-sonnet-4.6")
+CLAUDIBLE_MODEL_STRONG = os.getenv("CLAUDIBLE_MODEL_STRONG", "claude-sonnet-4.6")
+CLAUDIBLE_MODEL_FAST = os.getenv("CLAUDIBLE_MODEL_FAST", "claude-haiku-4.5")
 
 # AI — Fallback (Anthropic direct, OpenAI-compatible endpoint)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL_STRONG = os.getenv("ANTHROPIC_MODEL_STRONG", "claude-opus-4-5")
-ANTHROPIC_MODEL_FAST = os.getenv("ANTHROPIC_MODEL_FAST", "claude-sonnet-4-5")
+ANTHROPIC_MODEL_STRONG = os.getenv("ANTHROPIC_MODEL_STRONG", "claude-sonnet-4-5")
+ANTHROPIC_MODEL_FAST = os.getenv("ANTHROPIC_MODEL_FAST", "claude-haiku-4-5")
 
 # AI — Secondary fallback (OpenAI)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

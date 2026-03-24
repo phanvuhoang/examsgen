@@ -12,33 +12,33 @@ from backend.config import (
 
 logger = logging.getLogger(__name__)
 
+# Haiku model names (cheapest/fastest tier)
+CLAUDIBLE_MODEL_HAIKU = "claude-haiku-4.5"
+ANTHROPIC_MODEL_HAIKU = "claude-haiku-4-5"
+
 
 def _get_providers(model_tier: str, provider: str = None):
     """Return ordered list of (name, base_url, api_key, model) tuples.
-    If provider is specified, return only that provider (no fallback chain).
+    model_tier: 'fast' (sonnet), 'strong' (sonnet/opus), 'haiku' (cheapest)
     """
+    def _claudible_model(tier):
+        if tier == "haiku": return CLAUDIBLE_MODEL_HAIKU
+        if tier == "strong": return CLAUDIBLE_MODEL_STRONG
+        return CLAUDIBLE_MODEL_FAST  # 'fast' = sonnet
+
+    def _anthropic_model(tier):
+        if tier == "haiku": return ANTHROPIC_MODEL_HAIKU
+        if tier == "strong": return ANTHROPIC_MODEL_STRONG
+        return ANTHROPIC_MODEL_FAST  # 'fast' = sonnet
+
     all_providers = []
     if CLAUDIBLE_API_KEY:
-        all_providers.append((
-            "claudible",
-            CLAUDIBLE_BASE_URL,
-            CLAUDIBLE_API_KEY,
-            CLAUDIBLE_MODEL_STRONG if model_tier == "strong" else CLAUDIBLE_MODEL_FAST,
-        ))
+        all_providers.append(("claudible", CLAUDIBLE_BASE_URL, CLAUDIBLE_API_KEY, _claudible_model(model_tier)))
     if ANTHROPIC_API_KEY:
-        all_providers.append((
-            "anthropic",
-            "https://api.anthropic.com/v1",
-            ANTHROPIC_API_KEY,
-            ANTHROPIC_MODEL_STRONG if model_tier == "strong" else ANTHROPIC_MODEL_FAST,
-        ))
+        all_providers.append(("anthropic", "https://api.anthropic.com/v1", ANTHROPIC_API_KEY, _anthropic_model(model_tier)))
     if OPENAI_API_KEY:
-        all_providers.append((
-            "openai",
-            "https://api.openai.com/v1",
-            OPENAI_API_KEY,
-            OPENAI_STRONG_MODEL if model_tier == "strong" else OPENAI_FAST_MODEL,
-        ))
+        all_providers.append(("openai", "https://api.openai.com/v1", OPENAI_API_KEY,
+                               OPENAI_STRONG_MODEL if model_tier == "strong" else OPENAI_FAST_MODEL))
 
     if provider:
         filtered = [p for p in all_providers if p[0] == provider]
@@ -48,8 +48,9 @@ def _get_providers(model_tier: str, provider: str = None):
 
 
 MAX_TOKENS_BY_TIER = {
-    "fast": 6000,    # MCQ — needs room for full working steps (3 MCQ × ~1800 tokens)
-    "strong": 8000,  # Scenario/Longform — longer output
+    "haiku": 6000,   # Haiku — MCQ, simple tasks
+    "fast": 6000,    # Sonnet — MCQ with full working steps
+    "strong": 8000,  # Sonnet/Opus — Scenario/Longform
 }
 
 
