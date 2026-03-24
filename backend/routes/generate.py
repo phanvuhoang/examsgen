@@ -20,17 +20,40 @@ router = APIRouter(prefix="/api/generate", tags=["generate"])
 
 
 def _resolve_session_id(session_id: int = None) -> int:
-    """Resolve session_id: use provided or fall back to default session."""
+    """Resolve session_id: use provided, then default with files, then any session with files."""
     with get_db() as conn:
         cur = conn.cursor()
         if session_id:
             cur.execute("SELECT id FROM exam_sessions WHERE id = %s", (session_id,))
-        else:
-            cur.execute("SELECT id FROM exam_sessions WHERE is_default = TRUE LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                return row[0]
+
+        # Try default session — but only if it has files
+        cur.execute("SELECT id FROM exam_sessions WHERE is_default = TRUE ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+        if row:
+            default_id = row[0]
+            cur.execute("SELECT COUNT(*) FROM session_files WHERE session_id = %s AND is_active = TRUE", (default_id,))
+            if cur.fetchone()[0] > 0:
+                return default_id
+
+        # Default session has no files — use most recent session WITH files
+        cur.execute("""
+            SELECT DISTINCT sf.session_id
+            FROM session_files sf
+            WHERE sf.is_active = TRUE
+            ORDER BY sf.session_id DESC
+            LIMIT 1
+        """)
         row = cur.fetchone()
         if row:
             return row[0]
-    return None
+
+        # Absolute last resort: most recently created session
+        cur.execute("SELECT id FROM exam_sessions ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+        return row[0] if row else None
 
 
 def _save_question(question_type, sac_thue, question_part, question_number,
@@ -96,6 +119,7 @@ def generate_mcq(req: MCQGenerateRequest):
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
             sample=ctx["sample"],
+            sample_note=ctx.get("sample_note", ""),
             syllabus_codes_instruction=syllabus_instr,
             difficulty_instruction=diff_instr,
             custom_instructions=custom_block,
@@ -167,6 +191,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
             sample=ctx["sample"],
+            sample_note=ctx.get("sample_note", ""),
             industry_instruction=industry_instr,
             question_type="SCENARIO_10",
             syllabus_codes_instruction=syllabus_instr,
@@ -233,6 +258,7 @@ def generate_longform(req: LongformGenerateRequest):
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
             sample=ctx["sample"],
+            sample_note=ctx.get("sample_note", ""),
             syllabus_codes_instruction=syllabus_instr,
             difficulty_instruction=diff_instr,
             custom_instructions=custom_block,

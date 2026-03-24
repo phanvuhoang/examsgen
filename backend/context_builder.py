@@ -11,10 +11,10 @@ from backend.database import get_db
 
 logger = logging.getLogger(__name__)
 
-# ~600K chars ≈ 150K tokens — safe for Claudible 200K context window
-MAX_CONTEXT_CHARS = 600_000
+# ~300K chars ≈ 75K tokens — keeps prompt well within Claudible limits
+MAX_CONTEXT_CHARS = 300_000
 # Per-regulation file cap to prevent one huge file eating all context
-MAX_PER_REG_CHARS = 150_000
+MAX_PER_REG_CHARS = 80_000
 
 TAX_TYPE_ALIASES = {
     "CIT": ["CIT"],
@@ -66,9 +66,11 @@ def _extract_with_cap(file_path: str, cap: int = MAX_PER_REG_CHARS) -> str:
 def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
     """
     Build generation context for the given session, tax type, and question type.
-    Returns dict with keys: tax_rates, syllabus, regulations, sample.
+    Returns dict with keys: tax_rates, syllabus, regulations, sample, sample_note.
     All text values are pre-trimmed to fit within MAX_CONTEXT_CHARS total.
     """
+    logger.info(f"build_context: session_id={session_id}, sac_thue={sac_thue}, question_type={question_type}")
+
     exam_type_map = {
         "MCQ": "MCQ",
         "SCENARIO_10": "Scenario",
@@ -98,6 +100,14 @@ def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
 
     # 3. Sample question for this tax type + exam type
     sample_files = _load_files(session_id, "sample", tax_type=sac_thue, exam_type=exam_type)
+    sample_note = ""
+    if sample_files:
+        loaded_tax = sample_files[0].get("tax_type", sac_thue)
+        if loaded_tax and loaded_tax != sac_thue:
+            sample_note = (
+                f"[STYLE REFERENCE NOTE: The sample below is from {loaded_tax} — "
+                f"replicate FORMAT and STRUCTURE only, not the tax content]"
+            )
     sample_parts = []
     for f in sample_files:
         text = _extract_with_cap(f["path"], cap=50_000)
@@ -114,6 +124,11 @@ def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
             reg_parts.append(f"## {f['name'] or f['path']}\n{text}")
     regulations = "\n\n".join(reg_parts)
 
+    logger.info(f"  regulations: {len(reg_files)} files — {[f['name'] for f in reg_files]}")
+    logger.info(f"  syllabus: {len(syllabus_files)} files — {[f['name'] for f in syllabus_files]}")
+    logger.info(f"  sample: {len(sample_files)} files — {[f['name'] for f in sample_files]}")
+    logger.info(f"  rates: {len(rates_files)} files — {[f['name'] for f in rates_files]}")
+
     # 5. Trim total to MAX_CONTEXT_CHARS
     fixed = len(tax_rates) + len(syllabus) + len(sample) + 5000
     reg_budget = MAX_CONTEXT_CHARS - fixed
@@ -124,11 +139,14 @@ def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
         logger.error(f"No context budget left for regulations! Fixed context = {fixed} chars")
         regulations = regulations[:50_000]
 
+    logger.info(f"  total context chars: regulations={len(regulations)}, syllabus={len(syllabus)}, sample={len(sample)}, rates={len(tax_rates)}")
+
     return {
         "tax_rates": tax_rates,
         "syllabus": syllabus,
         "regulations": regulations,
         "sample": sample,
+        "sample_note": sample_note,
     }
 
 

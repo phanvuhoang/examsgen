@@ -47,6 +47,12 @@ def _get_providers(model_tier: str, provider: str = None):
     return all_providers
 
 
+MAX_TOKENS_BY_TIER = {
+    "fast": 3000,    # MCQ — shorter output
+    "strong": 5000,  # Scenario/Longform — longer output
+}
+
+
 def call_ai(prompt: str = None, model_tier: str = "strong", system_prompt: str = None, messages: list = None, provider: str = None) -> dict:
     """Call AI with fallback chain. Returns dict with content, model, provider, tokens.
 
@@ -82,7 +88,7 @@ def call_ai(prompt: str = None, model_tier: str = "strong", system_prompt: str =
                     json={
                         "model": model,
                         "messages": messages,
-                        "max_tokens": 8000,
+                        "max_tokens": MAX_TOKENS_BY_TIER.get(model_tier, 3000),
                         "temperature": 0.7,
                     },
                     timeout=300,

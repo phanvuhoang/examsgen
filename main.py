@@ -12,7 +12,7 @@ from backend.routes.generate import router as generate_router
 from backend.routes.questions import router as questions_router
 from backend.routes.export import router as export_router
 from backend.routes.sessions import router as sessions_router
-from backend.seed import seed_regulations
+from backend.seed import seed_regulations, fix_default_session
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ def startup():
     try:
         init_db()
         seed_regulations()
+        fix_default_session()
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         logger.warning("App will run but DB features will be unavailable")

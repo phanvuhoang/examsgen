@@ -25,6 +25,7 @@ REGULATIONS (apply these to create realistic scenarios):
 {regulations}
 
 SAMPLE QUESTIONS (replicate this format, difficulty, and exam style EXACTLY):
+{sample_note}
 {sample}
 
 REQUIREMENTS:
@@ -88,6 +89,7 @@ REGULATIONS:
 {regulations}
 
 SAMPLE FORMAT:
+{sample_note}
 {sample}
 
 Return ONLY valid JSON in this exact format:
@@ -142,6 +144,7 @@ REGULATIONS:
 {regulations}
 
 SAMPLE FORMAT:
+{sample_note}
 {sample}
 
 Return ONLY valid JSON in this exact format:
