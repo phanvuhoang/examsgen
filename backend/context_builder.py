@@ -135,21 +135,77 @@ def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
     syllabus = "\n\n".join(syllabus_parts)
 
     # 3. Sample question for this tax type + exam type
-    sample_files = _load_files(session_id, "sample", tax_type=sac_thue, exam_type=exam_type)
+    # Use parsed sample_examples from DB (3 random examples) instead of full file
+    # This reduces sample context from ~8K tokens to ~1.5K tokens
+    sample = ""
     sample_note = ""
-    if sample_files:
-        loaded_tax = sample_files[0].get("tax_type", sac_thue)
-        if loaded_tax and loaded_tax != sac_thue:
-            sample_note = (
-                f"[STYLE REFERENCE NOTE: The sample below is from {loaded_tax} — "
-                f"replicate FORMAT and STRUCTURE only, not the tax content]"
-            )
-    sample_parts = []
-    for f in sample_files:
-        text = _extract_with_cap(f["path"], cap=50_000)
-        if text:
-            sample_parts.append(f"## {f['name'] or f['path']}\n{text}")
-    sample = "\n\n".join(sample_parts)
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT se.content, se.example_number, se.tax_type
+                FROM sample_examples se
+                JOIN session_files sf ON se.file_id = sf.id
+                WHERE se.session_id = %s
+                  AND se.tax_type = %s
+                  AND se.exam_type = %s
+                  AND sf.is_active = TRUE
+                ORDER BY RANDOM()
+                LIMIT 3
+            """, (session_id, sac_thue, exam_type))
+            rows = cur.fetchall()
+
+        if not rows:
+            # Fallback: any exam type for this tax type
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT se.content, se.example_number, se.tax_type
+                    FROM sample_examples se
+                    JOIN session_files sf ON se.file_id = sf.id
+                    WHERE se.session_id = %s AND se.tax_type = %s AND sf.is_active = TRUE
+                    ORDER BY RANDOM() LIMIT 3
+                """, (session_id, sac_thue))
+                rows = cur.fetchall()
+                if rows:
+                    sample_note = f"[STYLE REFERENCE: samples below are {exam_type}-style from {sac_thue} — replicate FORMAT only]"
+
+        if not rows:
+            # Last fallback: any sample for any tax type
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT se.content, se.example_number, se.tax_type
+                    FROM sample_examples se
+                    JOIN session_files sf ON se.file_id = sf.id
+                    WHERE se.session_id = %s AND sf.is_active = TRUE
+                    ORDER BY RANDOM() LIMIT 2
+                """, (session_id,))
+                rows = cur.fetchall()
+                if rows:
+                    loaded_tax = rows[0][2]
+                    sample_note = (
+                        f"[STYLE REFERENCE NOTE: The samples below are from {loaded_tax} — "
+                        f"replicate FORMAT and STRUCTURE only, not the tax content]"
+                    )
+
+        if rows:
+            parts = [f"Example {r[1]}:\n{r[0][:3000]}" for r in rows]
+            sample = "\n\n---\n\n".join(parts)
+            logger.info(f"  sample: {len(rows)} examples from DB ({sac_thue}/{exam_type}), {len(sample)} chars")
+        else:
+            logger.info(f"  sample: no examples found in DB for {sac_thue}/{exam_type}")
+
+    except Exception as e:
+        logger.warning(f"Failed to load sample examples from DB: {e}. Falling back to file.")
+        # Fallback to old file-based approach if DB fails
+        sample_files = _load_files(session_id, "sample", tax_type=sac_thue, exam_type=exam_type)
+        sample_parts = []
+        for f in sample_files:
+            text = _extract_with_cap(f["path"], cap=15_000)  # reduced cap
+            if text:
+                sample_parts.append(f"## {f['name'] or f['path']}\n{text}")
+        sample = "\n\n".join(sample_parts)
 
     # 4. Regulations for this tax type
     reg_files = _load_files(session_id, "regulation", tax_type=sac_thue)
@@ -162,7 +218,7 @@ def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
 
     logger.info(f"  regulations: {len(reg_files)} files — {[f['name'] for f in reg_files]}")
     logger.info(f"  syllabus: {len(syllabus_files)} files — {[f['name'] for f in syllabus_files]}")
-    logger.info(f"  sample: {len(sample_files)} files — {[f['name'] for f in sample_files]}")
+    logger.info(f"  sample: {len(sample)} chars from DB examples")
     logger.info(f"  rates: {len(rates_files)} files — {[f['name'] for f in rates_files]}")
 
     # 5. Trim total to MAX_CONTEXT_CHARS
