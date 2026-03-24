@@ -5,11 +5,12 @@ from fastapi import APIRouter, HTTPException
 
 from backend.models import MCQGenerateRequest, ScenarioGenerateRequest, LongformGenerateRequest, RefineRequest
 from backend.ai_provider import call_ai, parse_ai_json
-from backend.context_builder import build_context, get_reference_content, build_kb_context
+from backend.context_builder import build_context, get_reference_content, format_question_as_text
 from backend.prompts import (
     MCQ_SYSTEM, MCQ_PROMPT,
     SCENARIO_SYSTEM, SCENARIO_PROMPT,
     LONGFORM_SYSTEM, LONGFORM_PROMPT,
+    build_syllabus_instruction, build_difficulty_instruction,
 )
 from backend.database import get_db
 from backend.html_renderer import render_question_html
@@ -18,45 +19,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/generate", tags=["generate"])
 
 
-def get_session(session_id: int = None) -> dict:
-    """Resolve exam session. Returns session dict or empty dict."""
+def _resolve_session_id(session_id: int = None) -> int:
+    """Resolve session_id: use provided or fall back to default session."""
     with get_db() as conn:
         cur = conn.cursor()
         if session_id:
-            cur.execute("SELECT * FROM exam_sessions WHERE id = %s", (session_id,))
+            cur.execute("SELECT id FROM exam_sessions WHERE id = %s", (session_id,))
         else:
-            cur.execute("SELECT * FROM exam_sessions WHERE is_default = TRUE LIMIT 1")
+            cur.execute("SELECT id FROM exam_sessions WHERE is_default = TRUE LIMIT 1")
         row = cur.fetchone()
-        if not row:
-            return {}
-        cols = [d[0] for d in cur.description]
-        return dict(zip(cols, row))
-
-
-def build_session_context(session: dict) -> str:
-    """Build session context string for prompt injection."""
-    if not session:
-        return ""
-    return f"""EXAM SESSION: {session['name']}
-REGULATIONS CUTOFF: Only use regulations effective up to {session['regulations_cutoff']}. Ignore any regulations enacted after this date.
-FISCAL PERIOD: All scenarios must use fiscal year ending {session['fiscal_year_end']}. Do not use dates beyond {session['fiscal_year_end']} in scenarios.
-TAX YEAR: {session['tax_year']}"""
+        if row:
+            return row[0]
+    return None
 
 
 def _save_question(question_type, sac_thue, question_part, question_number,
                    content_json, content_html, model_used, provider_used,
                    exam_session, duration_ms, prompt_tokens, completion_tokens,
-                   session_id=None, user_id=1):
+                   session_id=None, user_id=1, syllabus_codes=None):
     """Save question and generation log to DB. Returns question id."""
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO questions (question_type, sac_thue, question_part, question_number, "
-            "content_json, content_html, model_used, provider_used, exam_session, session_id, user_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            "content_json, content_html, model_used, provider_used, exam_session, session_id, user_id, syllabus_codes) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (question_type, sac_thue, question_part, question_number,
              json.dumps(content_json), content_html, model_used, provider_used, exam_session,
-             session_id, user_id),
+             session_id, user_id, syllabus_codes),
         )
         q_id = cur.fetchone()[0]
         cur.execute(
@@ -70,7 +60,6 @@ def _save_question(question_type, sac_thue, question_part, question_number,
 
 
 def _log_failure(question_type, sac_thue, error, duration_ms):
-    """Log a failed generation attempt."""
     try:
         with get_db() as conn:
             cur = conn.cursor()
@@ -87,23 +76,16 @@ def _log_failure(question_type, sac_thue, error, duration_ms):
 def generate_mcq(req: MCQGenerateRequest):
     start = time.time()
     try:
-        session = get_session(req.session_id)
-        session_ctx = build_session_context(session)
-        ctx = build_context(req.sac_thue, "MCQ")
-        topics_instruction = ""
-        if req.topics:
-            topics_instruction = f"Topics to focus on: {', '.join(req.topics)}"
-        if req.difficulty == "hard":
-            topics_instruction += "\nMake these HARDER than standard — multi-step with tricky edge cases."
+        session_id = _resolve_session_id(req.session_id)
+        if not session_id:
+            raise HTTPException(400, "No exam session configured. Please create a session first.")
 
+        ctx = build_context(session_id, req.sac_thue, "MCQ")
+        syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [])
+        diff_instr = build_difficulty_instruction(req.difficulty, req.topics)
         custom_block = get_reference_content(
             reference_question_id=req.reference_question_id,
             custom_instructions=req.custom_instructions,
-        )
-        kb_block = build_kb_context(
-            kb_syllabus_ids=req.kb_syllabus_ids,
-            kb_regulation_ids=req.kb_regulation_ids,
-            kb_sample_ids=req.kb_sample_ids,
         )
 
         prompt = MCQ_PROMPT.format(
@@ -114,10 +96,9 @@ def generate_mcq(req: MCQGenerateRequest):
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
             sample=ctx["sample"],
-            topics_instruction=topics_instruction,
+            syllabus_codes_instruction=syllabus_instr,
+            difficulty_instruction=diff_instr,
             custom_instructions=custom_block,
-            kb_context=kb_block,
-            session_context=session_ctx,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=MCQ_SYSTEM, provider=req.provider)
@@ -125,13 +106,19 @@ def generate_mcq(req: MCQGenerateRequest):
         content_html = render_question_html(content_json)
         duration_ms = int((time.time() - start) * 1000)
 
+        # Extract syllabus codes from generated content
+        generated_codes = []
+        for q in content_json.get("questions", []):
+            generated_codes.extend(q.get("syllabus_codes", []))
+
         q_id = _save_question(
             "MCQ", req.sac_thue, 1, "MCQ",
             content_json, content_html,
             result["model"], result["provider"],
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
-            session_id=session.get("id"), user_id=req.user_id,
+            session_id=session_id, user_id=req.user_id,
+            syllabus_codes=list(set(generated_codes)) or None,
         )
 
         return {
@@ -145,6 +132,8 @@ def generate_mcq(req: MCQGenerateRequest):
             "completion_tokens": result["completion_tokens"],
             "duration_ms": duration_ms,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
         _log_failure("MCQ", req.sac_thue, e, duration_ms)
@@ -156,21 +145,17 @@ def generate_mcq(req: MCQGenerateRequest):
 def generate_scenario(req: ScenarioGenerateRequest):
     start = time.time()
     try:
-        session = get_session(req.session_id)
-        session_ctx = build_session_context(session)
-        ctx = build_context(req.sac_thue, "SCENARIO_10", req.question_number)
-        industry_instruction = ""
-        if req.scenario_industry:
-            industry_instruction = f"Set the scenario in the {req.scenario_industry} industry."
+        session_id = _resolve_session_id(req.session_id)
+        if not session_id:
+            raise HTTPException(400, "No exam session configured. Please create a session first.")
 
+        ctx = build_context(session_id, req.sac_thue, "SCENARIO_10")
+        syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [])
+        diff_instr = build_difficulty_instruction(req.difficulty)
+        industry_instr = f"Set the scenario in the {req.scenario_industry} industry." if req.scenario_industry else ""
         custom_block = get_reference_content(
             reference_question_id=req.reference_question_id,
             custom_instructions=req.custom_instructions,
-        )
-        kb_block = build_kb_context(
-            kb_syllabus_ids=req.kb_syllabus_ids,
-            kb_regulation_ids=req.kb_regulation_ids,
-            kb_sample_ids=req.kb_sample_ids,
         )
 
         prompt = SCENARIO_PROMPT.format(
@@ -182,11 +167,11 @@ def generate_scenario(req: ScenarioGenerateRequest):
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
             sample=ctx["sample"],
-            industry_instruction=industry_instruction,
+            industry_instruction=industry_instr,
             question_type="SCENARIO_10",
+            syllabus_codes_instruction=syllabus_instr,
+            difficulty_instruction=diff_instr,
             custom_instructions=custom_block,
-            kb_context=kb_block,
-            session_context=session_ctx,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=SCENARIO_SYSTEM, provider=req.provider)
@@ -200,7 +185,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             result["model"], result["provider"],
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
-            session_id=session.get("id"), user_id=req.user_id,
+            session_id=session_id, user_id=req.user_id,
         )
 
         return {
@@ -214,6 +199,8 @@ def generate_scenario(req: ScenarioGenerateRequest):
             "completion_tokens": result["completion_tokens"],
             "duration_ms": duration_ms,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
         _log_failure("SCENARIO_10", req.sac_thue, e, duration_ms)
@@ -225,18 +212,16 @@ def generate_scenario(req: ScenarioGenerateRequest):
 def generate_longform(req: LongformGenerateRequest):
     start = time.time()
     try:
-        session = get_session(req.session_id)
-        session_ctx = build_session_context(session)
-        ctx = build_context(req.sac_thue, "LONGFORM_15", req.question_number)
+        session_id = _resolve_session_id(req.session_id)
+        if not session_id:
+            raise HTTPException(400, "No exam session configured. Please create a session first.")
 
+        ctx = build_context(session_id, req.sac_thue, "LONGFORM_15")
+        syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [])
+        diff_instr = build_difficulty_instruction(req.difficulty)
         custom_block = get_reference_content(
             reference_question_id=req.reference_question_id,
             custom_instructions=req.custom_instructions,
-        )
-        kb_block = build_kb_context(
-            kb_syllabus_ids=req.kb_syllabus_ids,
-            kb_regulation_ids=req.kb_regulation_ids,
-            kb_sample_ids=req.kb_sample_ids,
         )
 
         prompt = LONGFORM_PROMPT.format(
@@ -248,9 +233,9 @@ def generate_longform(req: LongformGenerateRequest):
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
             sample=ctx["sample"],
+            syllabus_codes_instruction=syllabus_instr,
+            difficulty_instruction=diff_instr,
             custom_instructions=custom_block,
-            kb_context=kb_block,
-            session_context=session_ctx,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=LONGFORM_SYSTEM, provider=req.provider)
@@ -264,7 +249,7 @@ def generate_longform(req: LongformGenerateRequest):
             result["model"], result["provider"],
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
-            session_id=session.get("id"), user_id=req.user_id,
+            session_id=session_id, user_id=req.user_id,
         )
 
         return {
@@ -278,6 +263,8 @@ def generate_longform(req: LongformGenerateRequest):
             "completion_tokens": result["completion_tokens"],
             "duration_ms": duration_ms,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
         _log_failure("LONGFORM_15", req.sac_thue, e, duration_ms)
@@ -288,22 +275,19 @@ def generate_longform(req: LongformGenerateRequest):
 @router.post("/refine")
 def refine_question(req: RefineRequest):
     """Refine a generated question via conversational chat."""
-    import json as _json
-
     system = """You are a senior ACCA TX(VNM) examiner refining an exam question based on the user's feedback.
 Return the COMPLETE updated question in the EXACT SAME JSON format as the input — do not omit any fields.
 Only change what the user asks to change.
 You can understand and respond to instructions in both English and Vietnamese.
 Before the JSON, write 1-2 sentences explaining what you changed."""
 
-    current_q_str = _json.dumps(req.current_content, ensure_ascii=False, indent=2)
+    current_q_str = json.dumps(req.current_content, ensure_ascii=False, indent=2)
 
     messages = [
         {"role": "user", "content": f"Here is the current question JSON:\n\n{current_q_str}"},
         {"role": "assistant", "content": "I have the question. What would you like me to change?"}
     ]
 
-    # Add conversation history
     for msg in req.conversation_history:
         if not (msg["role"] == "assistant" and "What would you like" in msg.get("content", "")):
             messages.append({"role": msg["role"], "content": msg["content"]})
@@ -313,7 +297,6 @@ Before the JSON, write 1-2 sentences explaining what you changed."""
         "content": req.user_message + "\n\nReturn your explanation followed by the complete updated JSON."
     })
 
-    # Trim history if too long (keep last 8 exchanges)
     if len(messages) > 18:
         messages = messages[:2] + messages[-16:]
 
@@ -321,7 +304,6 @@ Before the JSON, write 1-2 sentences explaining what you changed."""
         result = call_ai(messages=messages, model_tier=req.model_tier, system_prompt=system, provider=req.provider)
         raw = result["content"]
 
-        # Extract assistant note (text before JSON)
         json_start = raw.find('{')
         assistant_note = raw[:json_start].strip() if json_start > 5 else "Question updated!"
         updated_content = parse_ai_json(raw)

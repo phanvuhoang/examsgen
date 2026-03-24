@@ -256,6 +256,32 @@ def init_db():
             WHERE parameters = '[]'::jsonb OR parameters IS NULL
         """)
 
+        # v3: exam_sessions simplified columns
+        cur.execute("""
+            ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS exam_date VARCHAR(20);
+            ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS assumed_date VARCHAR(50);
+        """)
+
+        # v3: session_files table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS session_files (
+                id SERIAL PRIMARY KEY,
+                session_id INTEGER REFERENCES exam_sessions(id) ON DELETE CASCADE,
+                file_type VARCHAR(20) NOT NULL,
+                tax_type VARCHAR(20),
+                exam_type VARCHAR(20),
+                display_name VARCHAR(200),
+                file_name VARCHAR(500),
+                file_path VARCHAR(500),
+                file_size INTEGER,
+                is_active BOOLEAN DEFAULT TRUE,
+                uploaded_at TIMESTAMP DEFAULT NOW()
+            );
+        """)
+
+        # v3: questions table — syllabus_codes already added in v2 migration above
+        # (kept as-is)
+
         # Create session folders on disk
         cur.execute("SELECT folder_path FROM exam_sessions WHERE folder_path IS NOT NULL")
         for (fp,) in cur.fetchall():

@@ -1,33 +1,43 @@
-MCQ_SYSTEM = "You are a senior ACCA TX(VNM) examiner with deep expertise in Vietnamese taxation law."
+MCQ_SYSTEM = (
+    "You are a Senior ACCA TX(VNM) Examiner and Vietnamese tax partner with 30+ years of Big 4 experience. "
+    "You write exam questions at ACCA professional standard — not textbook exercises. "
+    "Every MCQ requires multi-step calculation or application of law to a fact pattern. "
+    "Never test pure recall. "
+    "Always cite the specific Article and Regulation in your answer/marking scheme. "
+    "Always tag each question with ACCA syllabus codes tested (e.g. CIT-2d, CIT-2e)."
+)
 
-MCQ_PROMPT = """Generate {count} MCQ question(s) on {sac_thue} for the {exam_session} exam.
+MCQ_PROMPT = """Generate {count} MCQ question(s) for Part 1 of ACCA TX(VNM).
 
-{session_context}
-
-REQUIREMENTS:
-- Each MCQ = 2 marks
-- 4 options A/B/C/D, one correct marked with "is_key": true
-- Scenario-based with specific VND amounts
-- Requires multi-step calculation (not just recall)
-- Distractors = specific, plausible student mistakes
-- Keep calculation and explanation CONCISE (max 1-2 sentences each)
-
-{kb_context}
-
-TAX RATES:
-{tax_rates}
-
-SYLLABUS SCOPE:
-{syllabus}
-
-REGULATIONS:
-{regulations}
-
-{topics_instruction}
-
+EXAM SESSION: {exam_session}
+TAX TYPE: {sac_thue}
+{syllabus_codes_instruction}
+{difficulty_instruction}
 {custom_instructions}
 
-Return ONLY valid JSON, no markdown, no extra text:
+TAX RATES (use these figures in all calculations):
+{tax_rates}
+
+SYLLABUS (scope of what can be tested — stay within this):
+{syllabus}
+
+REGULATIONS (apply these to create realistic scenarios):
+{regulations}
+
+SAMPLE QUESTIONS (replicate this format, difficulty, and exam style EXACTLY):
+{sample}
+
+REQUIREMENTS:
+- Each MCQ = exactly 2 marks
+- 4 options (A/B/C/D), exactly one correct answer
+- Each option requires a calculation or multi-step reasoning — never a simple recall answer
+- Distractors must be plausible common mistakes (wrong rate, missed condition, incorrect formula)
+- Correct answer includes full step-by-step working
+- Each distractor includes a brief explanation of why it is wrong
+- Cite specific Article and Regulation in the correct answer
+- At the end of each question, list: Syllabus codes tested: [e.g. CIT-2d, CIT-2e]
+
+OUTPUT FORMAT — return ONLY valid JSON, no markdown, no extra text:
 {{
   "type": "MCQ",
   "sac_thue": "{sac_thue}",
@@ -36,15 +46,16 @@ Return ONLY valid JSON, no markdown, no extra text:
     {{
       "number": 1,
       "marks": 2,
-      "scenario": "Brief scenario max 3 sentences.",
-      "question": "What is...?",
+      "scenario": "On 1 January 2026, ABC Co...",
+      "question": "What is the deductible expense for CIT purposes in the year ended 31 December 2025?",
+      "syllabus_codes": ["CIT-2d", "CIT-2e"],
       "options": {{
-        "A": {{"text": "VND X million", "calculation": "formula = result", "explanation": "Wrong because...", "is_key": false}},
-        "B": {{"text": "VND Y million", "calculation": "formula = result", "explanation": "Correct per Article X.", "is_key": true}},
-        "C": {{"text": "VND Z million", "calculation": "formula = result", "explanation": "Wrong because...", "is_key": false}},
-        "D": {{"text": "VND W million", "calculation": "formula = result", "explanation": "Wrong because...", "is_key": false}}
+        "A": {{"text": "VND X million", "is_key": false, "explanation": "Wrong because..."}},
+        "B": {{"text": "VND Y million", "is_key": false, "explanation": "Wrong because..."}},
+        "C": {{"text": "VND Z million", "is_key": true, "working": "Step 1: ... Step 2: ...", "explanation": "Correct per Article X, Decree Y"}},
+        "D": {{"text": "VND W million", "is_key": false, "explanation": "Wrong because..."}}
       }},
-      "regulation_refs": ["Article X, Decree Y"]
+      "regulation_refs": ["Article 9, Decree 320/2025/ND-CP"]
     }}
   ]
 }}
@@ -55,7 +66,10 @@ SCENARIO_SYSTEM = "You are a senior ACCA TX(VNM) examiner. Generate exam-standar
 
 SCENARIO_PROMPT = """Generate Question {question_number} — a {marks}-mark scenario question on {sac_thue} for the {exam_session} exam.
 
-{session_context}
+{syllabus_codes_instruction}
+{difficulty_instruction}
+{industry_instruction}
+{custom_instructions}
 
 STRUCTURE:
 - One integrated business scenario (Vietnamese company/individual)
@@ -63,10 +77,6 @@ STRUCTURE:
 - Marks per sub-question shown in brackets, summing to exactly {marks}
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include full marking scheme at the end
-
-{industry_instruction}
-
-{kb_context}
 
 TAX RATES:
 {tax_rates}
@@ -79,8 +89,6 @@ REGULATIONS:
 
 SAMPLE FORMAT:
 {sample}
-
-{custom_instructions}
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -112,7 +120,9 @@ LONGFORM_SYSTEM = SCENARIO_SYSTEM
 
 LONGFORM_PROMPT = """Generate Question {question_number} — a {marks}-mark long-form scenario question on {sac_thue} for the {exam_session} exam.
 
-{session_context}
+{syllabus_codes_instruction}
+{difficulty_instruction}
+{custom_instructions}
 
 STRUCTURE:
 - Complex integrated business scenario with MULTIPLE tax issues
@@ -121,8 +131,6 @@ STRUCTURE:
 - Mix of CALCULATION and WRITTEN EXPLANATION sub-questions
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include detailed marking scheme showing each individual mark
-
-{kb_context}
 
 TAX RATES:
 {tax_rates}
@@ -135,8 +143,6 @@ REGULATIONS:
 
 SAMPLE FORMAT:
 {sample}
-
-{custom_instructions}
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -163,3 +169,21 @@ Return ONLY valid JSON in this exact format:
 }}
 
 Make it COMPLEX — multiple interrelated issues requiring deep understanding of {sac_thue} regulations."""
+
+
+def build_syllabus_instruction(syllabus_codes: list) -> str:
+    if not syllabus_codes:
+        return ""
+    codes_str = ", ".join(syllabus_codes)
+    return f"SYLLABUS CODES TO TARGET: {codes_str}\nThe question(s) MUST test these specific syllabus items."
+
+
+def build_difficulty_instruction(difficulty: str, topics: list = None) -> str:
+    parts = []
+    if difficulty == "hard":
+        parts.append("DIFFICULTY: Hard — use complex fact patterns, multiple entities, or tricky edge cases.")
+    else:
+        parts.append("DIFFICULTY: Standard — typical ACCA exam difficulty.")
+    if topics:
+        parts.append(f"TOPIC FOCUS: {', '.join(topics)}")
+    return "\n".join(parts)

@@ -11,9 +11,7 @@ from backend.routes.regulations import router as regulations_router
 from backend.routes.generate import router as generate_router
 from backend.routes.questions import router as questions_router
 from backend.routes.export import router as export_router
-from backend.routes.kb import router as kb_router
 from backend.routes.sessions import router as sessions_router
-from backend.routes.sample_questions import router as sample_questions_router
 from backend.seed import seed_regulations
 
 logging.basicConfig(level=logging.INFO)
@@ -21,9 +19,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ExamsGen", description="ACCA TX(VNM) Exam Question Generator")
 
-# Auth middleware
-# TODO: Replace APP_PASSWORD single-user auth with per-user JWT auth
-# user_id should come from JWT token, not hardcoded to 1
 app.add_middleware(AuthMiddleware)
 
 # Routes
@@ -32,9 +27,7 @@ app.include_router(regulations_router)
 app.include_router(generate_router)
 app.include_router(questions_router)
 app.include_router(export_router)
-app.include_router(kb_router)
 app.include_router(sessions_router)
-app.include_router(sample_questions_router)
 
 
 @app.get("/api/health")

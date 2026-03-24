@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
-import ReferenceMultiSelect from '../components/ReferenceMultiSelect'
 
 const SAC_THUE_OPTIONS = ['CIT', 'VAT', 'PIT', 'FCT', 'TP', 'ADMIN']
 const QUESTION_MAP = {
@@ -20,21 +19,14 @@ export default function Generate() {
   const [difficulty, setDifficulty] = useState('standard')
   const [modelTier, setModelTier] = useState('fast')
   const [provider, setProvider] = useState('')
+  const [syllabusCodes, setSyllabusCodes] = useState('')  // simple text input e.g. "CIT-2d, CIT-2n"
+  const [customInstructions, setCustomInstructions] = useState('')
   const [showCustom, setShowCustom] = useState(false)
   const [referenceId, setReferenceId] = useState('')
-  const [customInstructions, setCustomInstructions] = useState('')
   const [referenceOptions, setReferenceOptions] = useState([])
-  // v2: Reference Materials
-  const [mcqSubtype, setMcqSubtype] = useState('')
-  const [selectedSyllabusCodes, setSelectedSyllabusCodes] = useState([])
-  const [syllabusChipLabels, setSyllabusChipLabels] = useState({})
-  const [selectedRegCodes, setSelectedRegCodes] = useState([])
-  const [regChipLabels, setRegChipLabels] = useState({})
-  const [selectedSampleIds, setSelectedSampleIds] = useState([])
-  const [sampleChipLabels, setSampleChipLabels] = useState({})
-  const [selectedQbIds, setSelectedQbIds] = useState([])
-  const [qbChipLabels, setQbChipLabels] = useState({})
 
+  const [sessions, setSessions] = useState([])
+  const [sessionId, setSessionId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -42,19 +34,17 @@ export default function Generate() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [currentContent, setCurrentContent] = useState(null)
-  const [currentSession, setCurrentSession] = useState(null)
-  // v2: Auto-tag suggestions
-  const [suggestions, setSuggestions] = useState(null)
-  const [suggestLoading, setSuggestLoading] = useState(false)
-  const [savedCodes, setSavedCodes] = useState(false)
-  const [lastQuestionId, setLastQuestionId] = useState(null)
 
-  // Load current session
+  // Load sessions
   useEffect(() => {
     api.getSessions().then((data) => {
-      const storedId = localStorage.getItem('currentSessionId')
-      const match = data.find((s) => String(s.id) === storedId) || data.find((s) => s.is_default)
-      if (match) setCurrentSession(match)
+      setSessions(data)
+      const stored = localStorage.getItem('currentSessionId')
+      const match = data.find((s) => String(s.id) === stored) || data.find((s) => s.is_default)
+      if (match) {
+        setSessionId(match.id)
+        if (match.exam_date) setExamSession(match.exam_date)
+      }
     }).catch(() => {})
   }, [])
 
@@ -78,20 +68,22 @@ export default function Generate() {
     }
   }, [type, sac_thue])
 
+  const parseSyllabusCodes = () => {
+    if (!syllabusCodes.trim()) return null
+    return syllabusCodes.split(',').map((s) => s.trim()).filter(Boolean)
+  }
+
   const handleGenerate = async () => {
     setLoading(true)
     setError('')
     setResult(null)
     try {
-      const kbFields = {
-        session_id: currentSession?.id || null,
+      const commonFields = {
+        session_id: sessionId || null,
         provider: provider || null,
-        // v2 Reference Materials
-        mcq_subtype: mcqSubtype || null,
-        syllabus_codes: selectedSyllabusCodes.length ? selectedSyllabusCodes : null,
-        reg_codes: selectedRegCodes.length ? selectedRegCodes : null,
-        sample_question_ids: selectedSampleIds.length ? selectedSampleIds : null,
-        question_bank_ids: selectedQbIds.length ? selectedQbIds : null,
+        syllabus_codes: parseSyllabusCodes(),
+        custom_instructions: customInstructions || null,
+        reference_question_id: referenceId ? parseInt(referenceId) : null,
       }
       let data
       if (type === 'mcq') {
@@ -102,9 +94,7 @@ export default function Generate() {
           topics: topics ? topics.split(',').map((t) => t.trim()) : null,
           difficulty,
           model_tier: modelTier,
-          reference_question_id: referenceId ? parseInt(referenceId) : null,
-          custom_instructions: customInstructions || null,
-          ...kbFields,
+          ...commonFields,
         })
       } else if (type === 'scenario') {
         data = await api.generateScenario({
@@ -114,9 +104,7 @@ export default function Generate() {
           exam_session: examSession,
           scenario_industry: industry || null,
           model_tier: modelTier,
-          reference_question_id: referenceId ? parseInt(referenceId) : null,
-          custom_instructions: customInstructions || null,
-          ...kbFields,
+          ...commonFields,
         })
       } else if (type === 'longform') {
         data = await api.generateLongform({
@@ -125,26 +113,12 @@ export default function Generate() {
           marks: 15,
           exam_session: examSession,
           model_tier: modelTier,
-          reference_question_id: referenceId ? parseInt(referenceId) : null,
-          custom_instructions: customInstructions || null,
-          ...kbFields,
+          ...commonFields,
         })
       }
       setResult(data)
       setCurrentContent(data.content_json)
       setChatHistory([{ role: 'assistant', content: 'Question ready! Ask me to adjust anything — in English or Vietnamese.' }])
-      // Auto-suggest tags in background
-      setLastQuestionId(data.question_id)
-      setSuggestions(null)
-      setSavedCodes(false)
-      setSuggestLoading(true)
-      api.suggestCodes({
-        content: data.content_html || '',
-        tax_type: sac_thue,
-        session_id: currentSession?.id,
-        question_type: type,
-      }).then((s) => { setSuggestions(s); setSuggestLoading(false) })
-        .catch(() => setSuggestLoading(false))
     } catch (err) {
       setError(err.message || 'Generation failed')
     } finally {
@@ -167,19 +141,36 @@ export default function Generate() {
     }
   }
 
+  const currentSession = sessions.find((s) => s.id === sessionId)
+
   return (
     <div className="max-w-4xl">
       <h2 className="text-2xl font-bold mb-6">Generate Questions</h2>
 
-      {/* Session info bar */}
-      {currentSession && (
-        <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4 flex gap-4">
-          <span>Session: <strong>{currentSession.name}</strong></span>
-          <span>Reg cutoff: <strong>{currentSession.regulations_cutoff}</strong></span>
-          <span>Fiscal year: <strong>{currentSession.fiscal_year_end}</strong></span>
-          <span>Tax year: <strong>{currentSession.tax_year}</strong></span>
-        </div>
-      )}
+      {/* Session selector */}
+      <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-4 py-2 mb-5 border">
+        <span className="text-sm text-gray-500 shrink-0">Session:</span>
+        <select
+          value={sessionId || ''}
+          onChange={(e) => {
+            const id = parseInt(e.target.value)
+            setSessionId(id)
+            const s = sessions.find((x) => x.id === id)
+            if (s?.exam_date) setExamSession(s.exam_date)
+          }}
+          className="text-sm border-0 bg-transparent flex-1 focus:outline-none"
+        >
+          <option value="">— Select session —</option>
+          {sessions.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}{s.is_default ? ' (active)' : ''}</option>
+          ))}
+        </select>
+        {currentSession && (
+          <span className="text-xs text-gray-400 shrink-0">
+            {currentSession.file_count || 0} files loaded
+          </span>
+        )}
+      </div>
 
       {/* Step 1: Type Selection */}
       <div className="mb-6">
@@ -242,23 +233,6 @@ export default function Generate() {
                     <option value="hard">Hard</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">AI Provider + Model</label>
-                  <select value={`${provider || 'auto'}|${modelTier}`} onChange={(e) => {
-                    const [p, t] = e.target.value.split('|')
-                    setProvider(p === 'auto' ? '' : p)
-                    setModelTier(t)
-                  }} className="w-full border rounded-lg px-3 py-2">
-                    <option value="auto|fast">Auto — Sonnet (fast)</option>
-                    <option value="auto|strong">Auto — Opus (best)</option>
-                    <option value="claudible|fast">Claudible — Sonnet</option>
-                    <option value="claudible|strong">Claudible — Opus</option>
-                    <option value="anthropic|fast">Anthropic — Sonnet</option>
-                    <option value="anthropic|strong">Anthropic — Opus</option>
-                    <option value="openai|fast">OpenAI — Fast</option>
-                    <option value="openai|strong">OpenAI — Strong</option>
-                  </select>
-                </div>
               </>
             )}
 
@@ -298,25 +272,44 @@ export default function Generate() {
               </div>
             )}
 
-            {type !== 'mcq' && (
-              <div>
-                <label className="block text-sm font-medium mb-1">AI Provider + Model</label>
-                <select value={`${provider || 'auto'}|${modelTier}`} onChange={(e) => {
-                  const [p, t] = e.target.value.split('|')
-                  setProvider(p === 'auto' ? '' : p)
-                  setModelTier(t)
-                }} className="w-full border rounded-lg px-3 py-2">
-                  <option value="auto|fast">Auto — Sonnet (fast)</option>
-                  <option value="auto|strong">Auto — Opus (best)</option>
-                  <option value="claudible|fast">Claudible — Sonnet</option>
-                  <option value="claudible|strong">Claudible — Opus</option>
-                  <option value="anthropic|fast">Anthropic — Sonnet</option>
-                  <option value="anthropic|strong">Anthropic — Opus</option>
-                  <option value="openai|fast">OpenAI — Fast</option>
-                  <option value="openai|strong">OpenAI — Strong</option>
-                </select>
-              </div>
-            )}
+            <div>
+              <label className="block text-sm font-medium mb-1">AI Provider + Model</label>
+              <select value={`${provider || 'auto'}|${modelTier}`} onChange={(e) => {
+                const [p, t] = e.target.value.split('|')
+                setProvider(p === 'auto' ? '' : p)
+                setModelTier(t)
+              }} className="w-full border rounded-lg px-3 py-2">
+                <option value="auto|fast">Auto — Sonnet (fast)</option>
+                <option value="auto|strong">Auto — Opus (best)</option>
+                <option value="claudible|fast">Claudible — Sonnet</option>
+                <option value="claudible|strong">Claudible — Opus</option>
+                <option value="anthropic|fast">Anthropic — Sonnet</option>
+                <option value="anthropic|strong">Anthropic — Opus</option>
+                <option value="openai|fast">OpenAI — Fast</option>
+                <option value="openai|strong">OpenAI — Strong</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Exam Session Label</label>
+              <input value={examSession} onChange={(e) => setExamSession(e.target.value)}
+                placeholder="e.g. Jun2026"
+                className="w-full border rounded-lg px-3 py-2" />
+            </div>
+
+            {/* Syllabus codes */}
+            <div className="col-span-2">
+              <label className="block text-sm font-medium mb-1">Syllabus Codes (optional)</label>
+              <input
+                value={syllabusCodes}
+                onChange={(e) => setSyllabusCodes(e.target.value)}
+                placeholder="e.g. CIT-2d, CIT-2n"
+                className="w-full border rounded-lg px-3 py-2"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Comma-separated. Question(s) will target these specific syllabus items.
+              </p>
+            </div>
           </div>
 
           {/* Custom Instructions */}
@@ -326,18 +319,15 @@ export default function Generate() {
               onClick={() => setShowCustom(!showCustom)}
               className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900"
             >
-              <span>{showCustom ? '\u25BC' : '\u25B6'}</span>
+              <span>{showCustom ? '▼' : '▶'}</span>
               Custom Instructions (optional)
             </button>
 
             {showCustom && (
-              <div className="mt-3 space-y-4">
-                {/* Section A: Pick from bank */}
+              <div className="mt-3 space-y-3">
                 {referenceOptions.length > 0 && (
                   <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Base on question from bank
-                    </label>
+                    <label className="block text-sm font-medium mb-1">Base on question from bank</label>
                     <select
                       value={referenceId}
                       onChange={(e) => setReferenceId(e.target.value)}
@@ -350,104 +340,14 @@ export default function Generate() {
                     </select>
                   </div>
                 )}
-
-                {/* Section B: Paste or describe */}
                 <div>
-                  <label className="block text-sm font-medium mb-1">
-                    Paste a sample or describe what you want
-                  </label>
+                  <label className="block text-sm font-medium mb-1">Paste a sample or describe what you want</label>
                   <textarea
                     value={customInstructions}
                     onChange={(e) => setCustomInstructions(e.target.value)}
-                    rows={6}
+                    rows={5}
                     className="w-full border rounded-lg px-3 py-2 text-sm resize-y"
-                    placeholder={"Paste a complete Q&A to replicate its style...\n\nOR describe in English/Vietnamese:\n'Write a Q1 CIT scenario about a manufacturing company with issues on deductible expenses, depreciation of a leased machine, and a tax loss carry-forward from prior year.'"}
-                  />
-                  <p className="text-xs text-gray-400 mt-1">
-                    Supports English and Vietnamese. Paste a question to replicate, or describe in your own words.
-                  </p>
-                </div>
-
-                {/* Reference Materials */}
-                <div className="border-t pt-4 mt-2">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                    Reference Materials
-                  </p>
-
-                  {/* MCQ Subtype */}
-                  {type === 'mcq' && (
-                    <div className="mb-3">
-                      <label className="text-xs font-medium block mb-1">MCQ Format</label>
-                      <select value={mcqSubtype} onChange={(e) => setMcqSubtype(e.target.value)}
-                        className="border rounded px-3 py-1.5 text-sm w-48">
-                        <option value="">Auto (mixed)</option>
-                        <option value="MCQ-1">Single correct answer</option>
-                        <option value="MCQ-N">Multiple correct answers</option>
-                        <option value="MCQ-FIB">Fill in the blank</option>
-                      </select>
-                    </div>
-                  )}
-
-                  <ReferenceMultiSelect
-                    label="Syllabus items to focus on"
-                    placeholder="Search by code or topic... e.g. B2a, deductible"
-                    fetchFn={(q) => api.searchKBSyllabus({ session_id: currentSession?.id, tax_type: sac_thue, q })}
-                    displayFn={(item) => `[${item.syllabus_code}] ${(item.detailed_syllabus || item.topic || '').substring(0, 80)}`}
-                    selected={selectedSyllabusCodes}
-                    onSelect={(item) => {
-                      const code = item.syllabus_code
-                      if (!selectedSyllabusCodes.includes(code)) {
-                        setSelectedSyllabusCodes((p) => [...p, code])
-                        setSyllabusChipLabels((p) => ({ ...p, [code]: `[${code}] ${(item.detailed_syllabus || item.topic || '').substring(0, 60)}` }))
-                      }
-                    }}
-                    onRemove={(code) => setSelectedSyllabusCodes((p) => p.filter((c) => c !== code))}
-                  />
-
-                  <ReferenceMultiSelect
-                    label="Regulation paragraphs to cite"
-                    placeholder="Search by RegCode or text... e.g. CIT-ND320, salary"
-                    fetchFn={(q) => api.searchParsedRegulations({ session_id: currentSession?.id, tax_type: sac_thue, q })}
-                    displayFn={(item) => `[${item.reg_code}] ${(item.paragraph_text || '').substring(0, 80)}`}
-                    selected={selectedRegCodes}
-                    onSelect={(item) => {
-                      const code = item.reg_code
-                      if (!selectedRegCodes.includes(code)) {
-                        setSelectedRegCodes((p) => [...p, code])
-                        setRegChipLabels((p) => ({ ...p, [code]: `[${code}] ${(item.paragraph_text || '').substring(0, 60)}` }))
-                      }
-                    }}
-                    onRemove={(code) => setSelectedRegCodes((p) => p.filter((c) => c !== code))}
-                  />
-
-                  <ReferenceMultiSelect
-                    label="Style references (past exam samples)"
-                    placeholder="Search by title or content..."
-                    fetchFn={(q) => api.searchSampleQuestions({ question_type: type.toUpperCase(), tax_type: sac_thue, q })}
-                    displayFn={(item) => `[${item.question_type}•${item.tax_type}] ${item.title || item.id}`}
-                    selected={selectedSampleIds}
-                    onSelect={(item) => {
-                      if (!selectedSampleIds.includes(item.id)) {
-                        setSelectedSampleIds((p) => [...p, item.id])
-                        setSampleChipLabels((p) => ({ ...p, [item.id]: `[${item.question_type}•${item.tax_type}] ${item.title || item.id}` }))
-                      }
-                    }}
-                    onRemove={(id) => setSelectedSampleIds((p) => p.filter((i) => i !== id))}
-                  />
-
-                  <ReferenceMultiSelect
-                    label="Question bank references"
-                    placeholder="Search from generated questions..."
-                    fetchFn={(q) => api.searchQuestions({ question_type: type.toUpperCase(), sac_thue, q })}
-                    displayFn={(item) => `[${item.question_type}•${item.sac_thue}] ${item.question_number || item.id} (${item.created_at?.substring(0, 10)})`}
-                    selected={selectedQbIds}
-                    onSelect={(item) => {
-                      if (!selectedQbIds.includes(item.id)) {
-                        setSelectedQbIds((p) => [...p, item.id])
-                        setQbChipLabels((p) => ({ ...p, [item.id]: `[${item.question_type}•${item.sac_thue}] ${item.question_number || item.id}` }))
-                      }
-                    }}
-                    onRemove={(id) => setSelectedQbIds((p) => p.filter((i) => i !== id))}
+                    placeholder="Paste a complete Q&A to replicate its style, or describe in English/Vietnamese..."
                   />
                 </div>
               </div>
@@ -456,7 +356,7 @@ export default function Generate() {
 
           <button
             onClick={handleGenerate}
-            disabled={loading}
+            disabled={loading || !sessionId}
             className="mt-5 bg-brand-500 text-white px-8 py-3 rounded-lg font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center gap-2"
           >
             {loading && (
@@ -465,7 +365,7 @@ export default function Generate() {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
             )}
-            {loading ? 'Generating...' : 'Generate'}
+            {loading ? 'Generating...' : sessionId ? 'Generate' : 'Select a session first'}
           </button>
         </div>
       )}
@@ -493,95 +393,13 @@ export default function Generate() {
               </button>
             </div>
           </div>
-
-          {/* Meta */}
           <div className="flex gap-4 text-xs text-gray-500 mb-4">
             <span>Model: {result.model_used}</span>
             <span>Provider: {result.provider_used}</span>
             <span>Tokens: {result.prompt_tokens + result.completion_tokens}</span>
             <span>Time: {(result.duration_ms / 1000).toFixed(1)}s</span>
           </div>
-
-          {/* Rendered HTML */}
-          <div
-            className="question-html"
-            dangerouslySetInnerHTML={{ __html: result.content_html }}
-          />
-        </div>
-      )}
-
-      {/* Suggested Tags panel */}
-      {result && (
-        <div className="mt-4 border rounded-xl overflow-hidden shadow-sm">
-          <div className="bg-amber-50 px-4 py-2 border-b flex items-center gap-2">
-            <span className="text-sm font-semibold text-amber-700">🏷️ Suggested Tags</span>
-            <span className="text-xs text-amber-500">AI-detected syllabus & regulation references</span>
-            {suggestLoading && <span className="text-xs text-gray-400 ml-auto animate-pulse">Analysing...</span>}
-          </div>
-          {!suggestLoading && suggestions && (
-            <div className="p-4 space-y-3">
-              {suggestions.syllabus_codes?.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-gray-600 mb-1">Syllabus Items</p>
-                  <div className="flex flex-wrap gap-2">
-                    {suggestions.syllabus_codes.map((s) => (
-                      <div key={s.code} className="group relative">
-                        <span className="inline-flex items-center px-2 py-1 bg-blue-50 border border-blue-200 rounded text-xs font-mono text-blue-700 cursor-default">
-                          {s.code}
-                          <span className="hidden group-hover:block absolute bottom-full left-0 mb-1 w-64 bg-gray-800 text-white text-xs rounded p-2 z-10 shadow-lg whitespace-normal">
-                            <strong>{s.topic}</strong><br />{s.detail}<br /><em className="text-gray-300">{s.reason}</em>
-                          </span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {suggestions.reg_codes?.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-gray-600 mb-1">Regulation Paragraphs</p>
-                  <div className="flex flex-wrap gap-2">
-                    {suggestions.reg_codes.map((r) => (
-                      <div key={r.reg_code} className="group relative">
-                        <span className="inline-flex items-center px-2 py-1 bg-green-50 border border-green-200 rounded text-xs font-mono text-green-700 cursor-default">
-                          {r.reg_code}
-                          <span className="hidden group-hover:block absolute bottom-full left-0 mb-1 w-64 bg-gray-800 text-white text-xs rounded p-2 z-10 shadow-lg whitespace-normal">
-                            <strong>{r.doc_ref}</strong><br />{r.text}<br /><em className="text-gray-300">{r.reason}</em>
-                          </span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {suggestions.syllabus_codes?.length === 0 && suggestions.reg_codes?.length === 0 && (
-                <p className="text-xs text-gray-400">No matching references found. Upload syllabus/regulations in Knowledge Base first.</p>
-              )}
-              {(suggestions.syllabus_codes?.length > 0 || suggestions.reg_codes?.length > 0) && !savedCodes && (
-                <div className="pt-2 border-t flex items-center gap-2">
-                  <button
-                    onClick={async () => {
-                      await api.updateQuestionCodes(lastQuestionId, {
-                        syllabus_codes: suggestions.syllabus_codes.map((s) => s.code),
-                        reg_codes: suggestions.reg_codes.map((r) => r.reg_code),
-                      })
-                      setSavedCodes(true)
-                    }}
-                    className="px-3 py-1.5 bg-[#028a39] text-white rounded text-xs font-medium hover:bg-[#027a32]"
-                  >
-                    ✓ Save these tags to question
-                  </button>
-                  <button
-                    onClick={() => setSuggestions({ syllabus_codes: [], reg_codes: [] })}
-                    className="px-3 py-1.5 text-gray-500 text-xs hover:text-gray-700"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-              {savedCodes && <p className="text-xs text-green-600">✓ Tags saved to question</p>}
-            </div>
-          )}
+          <div className="question-html" dangerouslySetInnerHTML={{ __html: result.content_html }} />
         </div>
       )}
 
@@ -645,14 +463,11 @@ function RefineChat({ chatHistory, setChatHistory, chatInput, setChatInput, chat
         <span className="text-sm font-semibold text-gray-700">Refine this question</span>
         <span className="text-xs text-gray-400">English or Vietnamese</span>
       </div>
-
       <div className="p-4 space-y-3 max-h-72 overflow-y-auto" id="chat-scroll">
         {chatHistory.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] px-3 py-2 rounded-lg text-sm leading-relaxed ${
-              msg.role === 'user'
-                ? 'bg-[#028a39] text-white'
-                : 'bg-gray-100 text-gray-700'
+              msg.role === 'user' ? 'bg-[#028a39] text-white' : 'bg-gray-100 text-gray-700'
             }`}>
               {msg.content}
             </div>
@@ -666,7 +481,6 @@ function RefineChat({ chatHistory, setChatHistory, chatInput, setChatInput, chat
           </div>
         )}
       </div>
-
       <div className="border-t p-3 flex gap-2">
         <input
           value={chatInput}
