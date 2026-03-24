@@ -16,10 +16,8 @@ ANTHROPIC_MODEL_STRONG = os.getenv("ANTHROPIC_MODEL_STRONG", "claude-opus-4-6")
 
 # AI — OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL_GPT5      = os.getenv("OPENAI_MODEL_GPT5",      "gpt-5")
-OPENAI_MODEL_GPT5_MINI = os.getenv("OPENAI_MODEL_GPT5_MINI", "gpt-5-mini")
-OPENAI_MODEL_GPT5_NANO = os.getenv("OPENAI_MODEL_GPT5_NANO", "gpt-5-nano")
-OPENAI_MODEL_GPT4O_MINI= os.getenv("OPENAI_MODEL_GPT4O_MINI","gpt-4o-mini")
+OPENAI_MODEL_FAST   = os.getenv("OPENAI_MODEL_FAST",   "gpt-4o-mini")
+OPENAI_MODEL_STRONG = os.getenv("OPENAI_MODEL_STRONG", "gpt-4o")
 
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://legaldb_user:password@10.0.1.11:5432/examsgen")

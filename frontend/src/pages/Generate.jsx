@@ -303,10 +303,8 @@ export default function Generate() {
                   <option value="claudible|strong">Claudible — Opus 4.6</option>
                 </optgroup>
                 <optgroup label="── OpenAI ──">
-                  <option value="openai|gpt-5">OpenAI — GPT-5</option>
-                  <option value="openai|gpt-5-mini">OpenAI — GPT-5 Mini</option>
-                  <option value="openai|gpt-5-nano">OpenAI — GPT-5 Nano</option>
-                  <option value="openai|gpt-4o-mini">OpenAI — GPT-4o Mini</option>
+                  <option value="openai|fast">OpenAI — GPT-4o Mini (fast)</option>
+                  <option value="openai|strong">OpenAI — GPT-4o (strong)</option>
                 </optgroup>
               </select>
             </div>
