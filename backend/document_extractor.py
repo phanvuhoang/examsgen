@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 def parse_sample_examples(file_path: str) -> list:
     """
     Split a sample questions docx into individual examples.
-    Splits on patterns like: 'Example 1', 'Example 2', 'EXAMPLE 1', etc.
+    Splits on 'Example N:' (with colon) — the standard format in ACCA sample files.
+    Avoids false positives like 'per Example 10, Circular...' which have no colon.
     Returns list of dicts: {example_number, title, content}
     """
     try:
@@ -18,24 +19,28 @@ def parse_sample_examples(file_path: str) -> list:
         logger.warning(f"Cannot extract {file_path}: {e}")
         return []
 
-    # Split on "Example N" pattern (case-insensitive, at line start or after newline)
-    pattern = re.compile(r'(?:^|\n)(Example\s+\d+[^\n]*)', re.IGNORECASE)
+    # Split on 'Example N:' — colon required to avoid matching inline references
+    pattern = re.compile(r'(Example\s+\d+\s*:)', re.IGNORECASE)
     parts = pattern.split(text)
+    # parts = [preamble, heading1, content1, heading2, content2, ...]
 
     examples = []
-    # parts alternates: [preamble, heading1, content1, heading2, content2, ...]
-    i = 1  # skip preamble
+    i = 1  # skip preamble (index 0)
     while i < len(parts) - 1:
-        heading = parts[i].strip()
+        heading_raw = parts[i].strip()  # e.g. "Example 2:"
         content = parts[i + 1].strip() if i + 1 < len(parts) else ""
-        num_match = re.search(r'\d+', heading)
+        # Skip very short content — likely false positives
+        if len(content) < 50:
+            i += 2
+            continue
+        num_match = re.search(r'\d+', heading_raw)
         example_number = int(num_match.group()) if num_match else (len(examples) + 1)
-        if content:
-            examples.append({
-                "example_number": example_number,
-                "title": heading,
-                "content": f"{heading}\n\n{content}",
-            })
+        title = f"Example {example_number}"
+        examples.append({
+            "example_number": example_number,
+            "title": title,
+            "content": f"{title}: {content}",
+        })
         i += 2
 
     return examples
