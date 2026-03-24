@@ -9,8 +9,10 @@ logger = logging.getLogger(__name__)
 def parse_sample_examples(file_path: str) -> list:
     """
     Split a sample questions docx into individual examples.
-    Splits on 'Example N:' (with colon) — the standard format in ACCA sample files.
-    Avoids false positives like 'per Example 10, Circular...' which have no colon.
+    Handles 3 formats found in ACCA sample files:
+      - 'Example 1: text...'   (colon)
+      - 'Example 5 MBM JSC...' (space + text, no colon)
+    Excludes inline references like 'Example 10, point 2.16' or 'Example 8 of Circular'.
     Returns list of dicts: {example_number, title, content}
     """
     try:
@@ -19,29 +21,42 @@ def parse_sample_examples(file_path: str) -> list:
         logger.warning(f"Cannot extract {file_path}: {e}")
         return []
 
-    # Split on 'Example N:' — colon required to avoid matching inline references
-    pattern = re.compile(r'(Example\s+\d+\s*:)', re.IGNORECASE)
-    parts = pattern.split(text)
-    # parts = [preamble, heading1, content1, heading2, content2, ...]
+    # Match 'Example N' where N is followed by:
+    #   - colon: 'Example 1:'
+    #   - space + uppercase letter or digit (start of company name/year): 'Example 5 MBM'
+    # Exclude: 'Example N,' (inline ref) or 'Example N of/point/in' (inline ref)
+    pattern = re.compile(
+        r'(Example\s+\d+)'
+        r'(?=\s*:|'          # followed by colon
+        r'\s+[A-Z0-9])',     # OR space + uppercase/digit (company name/year)
+        re.IGNORECASE
+    )
+
+    # Find all valid heading positions
+    headings = []
+    for m in pattern.finditer(text):
+        pos = m.start()
+        after = text[m.end():m.end()+30]
+        # Exclude inline refs: 'Example N of', 'Example N point', 'Example N,'
+        if re.match(r'\s*(of|point|,|\.)', after, re.IGNORECASE):
+            continue
+        num_match = re.search(r'\d+', m.group())
+        n = int(num_match.group()) if num_match else 0
+        headings.append((pos, m.end(), n))
 
     examples = []
-    i = 1  # skip preamble (index 0)
-    while i < len(parts) - 1:
-        heading_raw = parts[i].strip()  # e.g. "Example 2:"
-        content = parts[i + 1].strip() if i + 1 < len(parts) else ""
-        # Skip very short content — likely false positives
+    for idx, (start, end, n) in enumerate(headings):
+        # Content goes from after heading to start of next heading (or end of text)
+        next_start = headings[idx + 1][0] if idx + 1 < len(headings) else len(text)
+        content = text[start:next_start].strip()
         if len(content) < 50:
-            i += 2
             continue
-        num_match = re.search(r'\d+', heading_raw)
-        example_number = int(num_match.group()) if num_match else (len(examples) + 1)
-        title = f"Example {example_number}"
+        title = f"Example {n}"
         examples.append({
-            "example_number": example_number,
+            "example_number": n,
             "title": title,
-            "content": f"{title}: {content}",
+            "content": content,
         })
-        i += 2
 
     return examples
 

@@ -48,8 +48,8 @@ def _get_providers(model_tier: str, provider: str = None):
 
 
 MAX_TOKENS_BY_TIER = {
-    "fast": 3000,    # MCQ — shorter output
-    "strong": 5000,  # Scenario/Longform — longer output
+    "fast": 6000,    # MCQ — needs room for full working steps (3 MCQ × ~1800 tokens)
+    "strong": 8000,  # Scenario/Longform — longer output
 }
 
 
