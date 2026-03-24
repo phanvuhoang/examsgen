@@ -12,9 +12,9 @@ export default function Generate() {
   const [type, setType] = useState(searchParams.get('type') || '')
   const [sac_thue, setSacThue] = useState(searchParams.get('sac_thue') || 'CIT')
   const [questionNumber, setQuestionNumber] = useState(searchParams.get('question_number') || 'Q1')
-  const [count, setCount] = useState(3)
+  const [count, setCount] = useState(1)
   const [topics, setTopics] = useState('')
-  const [examSession, setExamSession] = useState('Jun2026')
+  const [examSession, setExamSession] = useState('')
   const [industry, setIndustry] = useState('')
   const [difficulty, setDifficulty] = useState('standard')
   const [modelTier, setModelTier] = useState('fast')
@@ -25,6 +25,7 @@ export default function Generate() {
   const [referenceId, setReferenceId] = useState('')
   const [referenceOptions, setReferenceOptions] = useState([])
   const [sampleExamples, setSampleExamples] = useState([])
+  const [selectedExampleId, setSelectedExampleId] = useState(null)
 
   const [sessions, setSessions] = useState([])
   const [sessionId, setSessionId] = useState(null)
@@ -44,7 +45,8 @@ export default function Generate() {
       const match = data.find((s) => String(s.id) === stored) || data.find((s) => s.is_default)
       if (match) {
         setSessionId(match.id)
-        if (match.exam_date) setExamSession(match.exam_date)
+        // Use exam_date if set, otherwise fall back to session name
+        setExamSession(match.exam_date || match.name || '')
       }
     }).catch(() => {})
   }, [])
@@ -71,10 +73,13 @@ export default function Generate() {
 
   useEffect(() => {
     if (!sessionId || !sac_thue) return
-    api.getSampleExamples(sessionId, { sac_thue })
+    const examTypeMap = { mcq: 'MCQ', scenario: 'Scenario', longform: 'Longform' }
+    api.getSampleExamples(sessionId, { sac_thue, exam_type: examTypeMap[type] || 'MCQ' })
       .then(setSampleExamples)
       .catch(() => setSampleExamples([]))
-  }, [sessionId, sac_thue])
+    setSelectedExampleId(null)
+    setCustomInstructions('')
+  }, [sessionId, sac_thue, type])
 
   const parseSyllabusCodes = () => {
     if (!syllabusCodes.trim()) return null
@@ -164,7 +169,7 @@ export default function Generate() {
             const id = parseInt(e.target.value)
             setSessionId(id)
             const s = sessions.find((x) => x.id === id)
-            if (s?.exam_date) setExamSession(s.exam_date)
+            if (s) setExamSession(s.exam_date || s.name || '')
           }}
           className="text-sm border-0 bg-transparent flex-1 focus:outline-none"
         >
@@ -363,9 +368,17 @@ export default function Generate() {
                           key={ex.id}
                           example={ex}
                           sessionId={sessionId}
-                          onSelect={(content) => {
-                            setCustomInstructions(content)
-                            setShowCustom(true)
+                          selected={selectedExampleId === ex.id}
+                          onSelect={async (content) => {
+                            if (selectedExampleId === ex.id) {
+                              // Deselect — clear custom instructions
+                              setSelectedExampleId(null)
+                              setCustomInstructions('')
+                            } else {
+                              setSelectedExampleId(ex.id)
+                              setCustomInstructions(content)
+                              setShowCustom(true)
+                            }
                           }}
                         />
                       ))}
@@ -462,7 +475,7 @@ export default function Generate() {
   )
 }
 
-function ExampleCard({ example, sessionId, onSelect }) {
+function ExampleCard({ example, sessionId, onSelect, selected }) {
   const [hoverContent, setHoverContent] = useState(null)
   const [showTooltip, setShowTooltip] = useState(false)
 
@@ -482,13 +495,22 @@ function ExampleCard({ example, sessionId, onSelect }) {
         onMouseEnter={handleMouseEnter}
         onMouseLeave={() => setShowTooltip(false)}
         onClick={async () => {
-          const res = await api.getExampleFull(sessionId, example.id)
-          onSelect(res.content)
+          if (selected) {
+            onSelect(null)
+          } else {
+            const res = await api.getExampleFull(sessionId, example.id)
+            onSelect(res.content)
+          }
         }}
-        className="cursor-pointer flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white hover:border-gray-200 border border-transparent transition-all"
+        className={`cursor-pointer flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+          selected
+            ? 'border-brand-500 bg-brand-50'
+            : 'hover:bg-white hover:border-gray-200 border border-transparent'
+        }`}
       >
         <span className="text-xs font-medium text-gray-700 flex-1 truncate">{example.title}</span>
-        {example.syllabus_codes?.length > 0 && (
+        {selected && <span className="text-xs text-brand-500 shrink-0">✓ selected (click to deselect)</span>}
+        {!selected && example.syllabus_codes?.length > 0 && (
           <div className="flex gap-1 shrink-0">
             {example.syllabus_codes.slice(0, 3).map(c => (
               <span key={c} className="text-xs bg-green-100 text-green-700 px-1 rounded font-mono">{c}</span>

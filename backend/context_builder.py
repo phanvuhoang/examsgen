@@ -258,14 +258,19 @@ def get_reference_content(reference_question_id: int = None, custom_instructions
         except Exception as e:
             logger.warning(f"Failed to load reference question {reference_question_id}: {e}")
 
-    if custom_instructions:
-        if len(custom_instructions) > 300 and any(
-            kw in custom_instructions for kw in ["Answer", "VND", "marks", "Calculate"]
+    if custom_instructions and custom_instructions.strip():
+        # Cap custom instructions to avoid JSON truncation (max ~2000 chars)
+        MAX_CUSTOM = 2000
+        ci = custom_instructions.strip()
+        if len(ci) > MAX_CUSTOM:
+            ci = ci[:MAX_CUSTOM] + "\n[...truncated for length...]"
+        if len(ci) > 300 and any(
+            kw in ci for kw in ["Answer", "VND", "marks", "Calculate"]
         ):
             parts.append(
-                f"SAMPLE TO REPLICATE (write a NEW question with SIMILAR style, structure, difficulty and topic):\n{custom_instructions}"
+                f"SAMPLE TO REPLICATE (write a NEW question with SIMILAR style, structure, difficulty and topic):\n{ci}"
             )
         else:
-            parts.append(f"SPECIFIC INSTRUCTIONS FROM EXAMINER:\n{custom_instructions}")
+            parts.append(f"SPECIFIC INSTRUCTIONS FROM EXAMINER:\n{ci}")
 
     return "\n\n".join(parts)
