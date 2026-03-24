@@ -5,52 +5,66 @@ import logging
 
 from backend.config import (
     CLAUDIBLE_BASE_URL, CLAUDIBLE_API_KEY,
-    CLAUDIBLE_MODEL_STRONG, CLAUDIBLE_MODEL_FAST,
-    ANTHROPIC_API_KEY, ANTHROPIC_MODEL_STRONG, ANTHROPIC_MODEL_FAST,
-    OPENAI_API_KEY, OPENAI_MODEL, OPENAI_FAST_MODEL, OPENAI_STRONG_MODEL,
+    CLAUDIBLE_MODEL_HAIKU, CLAUDIBLE_MODEL_FAST, CLAUDIBLE_MODEL_STRONG,
+    ANTHROPIC_API_KEY,
+    ANTHROPIC_MODEL_HAIKU, ANTHROPIC_MODEL_FAST, ANTHROPIC_MODEL_STRONG,
+    OPENAI_API_KEY,
+    OPENAI_MODEL_GPT5, OPENAI_MODEL_GPT5_MINI, OPENAI_MODEL_GPT5_NANO, OPENAI_MODEL_GPT4O_MINI,
 )
 
 logger = logging.getLogger(__name__)
 
-# Haiku model names (cheapest/fastest tier)
-CLAUDIBLE_MODEL_HAIKU = "claude-haiku-4.5"
-ANTHROPIC_MODEL_HAIKU = "claude-haiku-4-5"
+# Map UI tier strings → model names
+CLAUDIBLE_TIERS = {
+    "haiku":  CLAUDIBLE_MODEL_HAIKU,
+    "fast":   CLAUDIBLE_MODEL_FAST,
+    "strong": CLAUDIBLE_MODEL_STRONG,
+}
+ANTHROPIC_TIERS = {
+    "haiku":  ANTHROPIC_MODEL_HAIKU,
+    "fast":   ANTHROPIC_MODEL_FAST,
+    "strong": ANTHROPIC_MODEL_STRONG,
+}
+# OpenAI: tier string IS the model name for explicit selection
+OPENAI_MODELS = {
+    "gpt-5":      OPENAI_MODEL_GPT5,
+    "gpt-5-mini": OPENAI_MODEL_GPT5_MINI,
+    "gpt-5-nano": OPENAI_MODEL_GPT5_NANO,
+    "gpt-4o-mini":OPENAI_MODEL_GPT4O_MINI,
+}
 
 
 def _get_providers(model_tier: str, provider: str = None):
-    """Return ordered list of (name, base_url, api_key, model) tuples.
-    model_tier: 'fast' (sonnet), 'strong' (sonnet/opus), 'haiku' (cheapest)
-    """
-    def _claudible_model(tier):
-        if tier == "haiku": return CLAUDIBLE_MODEL_HAIKU
-        if tier == "strong": return CLAUDIBLE_MODEL_STRONG
-        return CLAUDIBLE_MODEL_FAST  # 'fast' = sonnet
+    """Return list of (name, base_url, api_key, model) for the requested provider+tier."""
+    # OpenAI explicit model (tier = model name like 'gpt-5')
+    if provider == "openai" and model_tier in OPENAI_MODELS:
+        if OPENAI_API_KEY:
+            return [("openai", "https://api.openai.com/v1", OPENAI_API_KEY, OPENAI_MODELS[model_tier])]
+        return []
 
-    def _anthropic_model(tier):
-        if tier == "haiku": return ANTHROPIC_MODEL_HAIKU
-        if tier == "strong": return ANTHROPIC_MODEL_STRONG
-        return ANTHROPIC_MODEL_FAST  # 'fast' = sonnet
+    claudible = ("claudible", CLAUDIBLE_BASE_URL, CLAUDIBLE_API_KEY,
+                 CLAUDIBLE_TIERS.get(model_tier, CLAUDIBLE_MODEL_FAST)) if CLAUDIBLE_API_KEY else None
+    anthropic = ("anthropic", "https://api.anthropic.com/v1", ANTHROPIC_API_KEY,
+                 ANTHROPIC_TIERS.get(model_tier, ANTHROPIC_MODEL_FAST)) if ANTHROPIC_API_KEY else None
 
-    all_providers = []
-    if CLAUDIBLE_API_KEY:
-        all_providers.append(("claudible", CLAUDIBLE_BASE_URL, CLAUDIBLE_API_KEY, _claudible_model(model_tier)))
-    if ANTHROPIC_API_KEY:
-        all_providers.append(("anthropic", "https://api.anthropic.com/v1", ANTHROPIC_API_KEY, _anthropic_model(model_tier)))
-    if OPENAI_API_KEY:
-        all_providers.append(("openai", "https://api.openai.com/v1", OPENAI_API_KEY,
-                               OPENAI_STRONG_MODEL if model_tier == "strong" else OPENAI_FAST_MODEL))
+    if provider == "claudible":
+        return [claudible] if claudible else []
+    if provider == "anthropic":
+        return [anthropic] if anthropic else []
 
-    if provider:
-        filtered = [p for p in all_providers if p[0] == provider]
-        return filtered if filtered else all_providers
-
-    return all_providers
+    # No specific provider — try claudible first, then anthropic
+    return [p for p in [claudible, anthropic] if p]
 
 
 MAX_TOKENS_BY_TIER = {
-    "haiku": 6000,   # Haiku — MCQ, simple tasks
-    "fast": 6000,    # Sonnet — MCQ with full working steps
-    "strong": 8000,  # Sonnet/Opus — Scenario/Longform
+    "haiku":  6000,
+    "fast":   6000,
+    "strong": 8000,
+    # OpenAI models
+    "gpt-5":       8000,
+    "gpt-5-mini":  6000,
+    "gpt-5-nano":  6000,
+    "gpt-4o-mini": 6000,
 }
 
 

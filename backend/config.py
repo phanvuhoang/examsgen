@@ -4,19 +4,22 @@ import os
 # AI — Primary (Claudible, OpenAI-compatible)
 CLAUDIBLE_BASE_URL = os.getenv("CLAUDIBLE_BASE_URL", "https://claudible.io/v1")
 CLAUDIBLE_API_KEY = os.getenv("CLAUDIBLE_API_KEY", "")
-CLAUDIBLE_MODEL_STRONG = os.getenv("CLAUDIBLE_MODEL_STRONG", "claude-sonnet-4.6")
-CLAUDIBLE_MODEL_FAST = os.getenv("CLAUDIBLE_MODEL_FAST", "claude-haiku-4.5")
+CLAUDIBLE_MODEL_HAIKU  = os.getenv("CLAUDIBLE_MODEL_HAIKU",  "claude-haiku-4.5")
+CLAUDIBLE_MODEL_FAST   = os.getenv("CLAUDIBLE_MODEL_FAST",   "claude-sonnet-4.6")
+CLAUDIBLE_MODEL_STRONG = os.getenv("CLAUDIBLE_MODEL_STRONG", "claude-opus-4.6")
 
-# AI — Fallback (Anthropic direct, OpenAI-compatible endpoint)
+# AI — Anthropic direct
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL_STRONG = os.getenv("ANTHROPIC_MODEL_STRONG", "claude-sonnet-4-5")
-ANTHROPIC_MODEL_FAST = os.getenv("ANTHROPIC_MODEL_FAST", "claude-haiku-4-5")
+ANTHROPIC_MODEL_HAIKU  = os.getenv("ANTHROPIC_MODEL_HAIKU",  "claude-haiku-4-5")
+ANTHROPIC_MODEL_FAST   = os.getenv("ANTHROPIC_MODEL_FAST",   "claude-sonnet-4-6")
+ANTHROPIC_MODEL_STRONG = os.getenv("ANTHROPIC_MODEL_STRONG", "claude-opus-4-6")
 
-# AI — Secondary fallback (OpenAI)
+# AI — OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1")
-OPENAI_FAST_MODEL = os.getenv("OPENAI_FAST_MODEL", "gpt-4o-mini")
-OPENAI_STRONG_MODEL = os.getenv("OPENAI_STRONG_MODEL", "gpt-4o")
+OPENAI_MODEL_GPT5      = os.getenv("OPENAI_MODEL_GPT5",      "gpt-5")
+OPENAI_MODEL_GPT5_MINI = os.getenv("OPENAI_MODEL_GPT5_MINI", "gpt-5-mini")
+OPENAI_MODEL_GPT5_NANO = os.getenv("OPENAI_MODEL_GPT5_NANO", "gpt-5-nano")
+OPENAI_MODEL_GPT4O_MINI= os.getenv("OPENAI_MODEL_GPT4O_MINI","gpt-4o-mini")
 
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://legaldb_user:password@10.0.1.11:5432/examsgen")

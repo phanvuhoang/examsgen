@@ -287,28 +287,26 @@ export default function Generate() {
 
             <div>
               <label className="block text-sm font-medium mb-1">AI Provider + Model</label>
-              <select value={`${provider || 'auto'}|${modelTier}`} onChange={(e) => {
+              <select value={`${provider || 'anthropic'}|${modelTier}`} onChange={(e) => {
                 const [p, t] = e.target.value.split('|')
-                setProvider(p === 'auto' ? '' : p)
+                setProvider(p)
                 setModelTier(t)
               }} className="w-full border rounded-lg px-3 py-2">
-                <optgroup label="── Anthropic (direct) ──">
-                  <option value="anthropic|fast">Anthropic — Sonnet 4.5 ⭐ Default</option>
-                  <option value="anthropic|haiku">Anthropic — Haiku 4.5 (fast/cheap)</option>
-                  <option value="anthropic|strong">Anthropic — Sonnet 4.5 (strong)</option>
+                <optgroup label="── Anthropic ──">
+                  <option value="anthropic|haiku">Anthropic — Haiku 4.5 (nhanh/rẻ)</option>
+                  <option value="anthropic|fast">Anthropic — Sonnet 4.6 ⭐ Default</option>
+                  <option value="anthropic|strong">Anthropic — Opus 4.6 (mạnh nhất)</option>
                 </optgroup>
-                <optgroup label="── Claudible (proxy) ──">
+                <optgroup label="── Claudible ──">
+                  <option value="claudible|haiku">Claudible — Haiku 4.5</option>
                   <option value="claudible|fast">Claudible — Sonnet 4.6</option>
-                  <option value="claudible|haiku">Claudible — Haiku 4.5 (fast/cheap)</option>
-                  <option value="claudible|strong">Claudible — Sonnet 4.6 (strong)</option>
-                </optgroup>
-                <optgroup label="── Auto fallback ──">
-                  <option value="auto|fast">Auto — Sonnet (fast)</option>
-                  <option value="auto|strong">Auto — Sonnet/Opus (best)</option>
+                  <option value="claudible|strong">Claudible — Opus 4.6</option>
                 </optgroup>
                 <optgroup label="── OpenAI ──">
-                  <option value="openai|fast">OpenAI — GPT-4o mini</option>
-                  <option value="openai|strong">OpenAI — GPT-4o</option>
+                  <option value="openai|gpt-5">OpenAI — GPT-5</option>
+                  <option value="openai|gpt-5-mini">OpenAI — GPT-5 Mini</option>
+                  <option value="openai|gpt-5-nano">OpenAI — GPT-5 Nano</option>
+                  <option value="openai|gpt-4o-mini">OpenAI — GPT-4o Mini</option>
                 </optgroup>
               </select>
             </div>
