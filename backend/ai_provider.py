@@ -91,6 +91,16 @@ def call_ai(prompt: str = None, model_tier: str = "strong", system_prompt: str =
 
     last_error = None
     for provider_name, base_url, api_key, model in providers:
+        # OpenAI: convert system → developer role (required for o-series and newer models)
+        send_messages = messages
+        if provider_name == "openai":
+            send_messages = []
+            for m in messages:
+                if m["role"] == "system":
+                    send_messages.append({"role": "developer", "content": m["content"]})
+                else:
+                    send_messages.append(m)
+
         for attempt in range(3):
             try:
                 logger.info(f"Calling {provider_name} model={model} attempt={attempt + 1}")
@@ -102,8 +112,8 @@ def call_ai(prompt: str = None, model_tier: str = "strong", system_prompt: str =
                     },
                     json={
                         "model": model,
-                        "messages": messages,
-                        "max_tokens": MAX_TOKENS_BY_TIER.get(model_tier, 3000),
+                        "messages": send_messages,
+                        "max_tokens": MAX_TOKENS_BY_TIER.get(model_tier, 6000),
                         "temperature": 0.7,
                     },
                     timeout=300,
@@ -123,8 +133,9 @@ def call_ai(prompt: str = None, model_tier: str = "strong", system_prompt: str =
                     time.sleep(5 * (attempt + 1))
                     continue
                 else:
-                    logger.error(f"{provider_name} returned {response.status_code}: {response.text[:200]}")
-                    last_error = f"{provider_name}: HTTP {response.status_code}"
+                    err_body = response.text[:500]
+                    logger.error(f"{provider_name} returned {response.status_code}: {err_body}")
+                    last_error = f"{provider_name}: HTTP {response.status_code} — {err_body}"
                     break
             except requests.exceptions.Timeout:
                 logger.warning(f"{provider_name} timeout, attempt {attempt + 1}")

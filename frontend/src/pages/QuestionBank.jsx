@@ -55,6 +55,20 @@ export default function QuestionBank() {
     load()
   }
 
+  const handleExportSingle = async (id) => {
+    try {
+      const blob = await api.exportWord([id])
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ExamsGen_Q${id}.docx`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      alert('Export failed: ' + err.message)
+    }
+  }
+
   const handleExport = async () => {
     const ids = [...selected]
     if (ids.length === 0) return alert('Select questions to export')
@@ -184,6 +198,10 @@ export default function QuestionBank() {
                 {viewing.question_number || viewing.question_type} — {viewing.sac_thue}
               </h3>
               <div className="flex gap-2">
+                <button onClick={() => handleExportSingle(viewing.id)}
+                  className="bg-blue-500 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-600 flex items-center gap-1">
+                  ⬇ Word
+                </button>
                 <button onClick={() => handleDelete(viewing.id)}
                   className="text-red-500 hover:text-red-700 text-sm">Delete</button>
                 <button onClick={() => setViewing(null)}
