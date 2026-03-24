@@ -6,10 +6,13 @@ Priority order when trimming: rates > syllabus > samples > regulations (trim lar
 """
 import json
 import logging
+import os
 from backend.document_extractor import extract_text
 from backend.database import get_db
 
 logger = logging.getLogger(__name__)
+
+DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 
 # ~300K chars ≈ 75K tokens — keeps prompt well within Claudible limits
 MAX_CONTEXT_CHARS = 300_000
@@ -54,6 +57,8 @@ def _load_files(session_id: int, file_type: str, tax_type: str = None, exam_type
 def _extract_with_cap(file_path: str, cap: int = MAX_PER_REG_CHARS) -> str:
     """Extract text from file, capped at `cap` chars."""
     try:
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(DATA_DIR, file_path)
         text = extract_text(file_path)
         if len(text) > cap:
             text = text[:cap] + f"\n\n[... truncated at {cap} chars ...]"
