@@ -9,51 +9,90 @@ logger = logging.getLogger(__name__)
 def parse_sample_examples(file_path: str) -> list:
     """
     Split a sample questions docx into individual examples.
-    Handles 3 formats found in ACCA sample files:
-      - 'Example 1: text...'   (colon)
-      - 'Example 5 MBM JSC...' (space + text, no colon)
-    Excludes inline references like 'Example 10, point 2.16' or 'Example 8 of Circular'.
+    Rule: Split on paragraphs styled as Heading 2 that match 'Example N:' pattern.
+    If no Heading 2 found, fallback to 'Example N:' (colon required) in plain text.
     Returns list of dicts: {example_number, title, content}
     """
-    try:
-        text = extract_text(file_path)
-    except Exception as e:
-        logger.warning(f"Cannot extract {file_path}: {e}")
+    if not os.path.exists(file_path):
+        logger.warning(f"File not found: {file_path}")
         return []
 
-    # Match 'Example N' where N is followed by:
-    #   - colon: 'Example 1:'
-    #   - space + uppercase letter or digit (start of company name/year): 'Example 5 MBM'
-    # Exclude: 'Example N,' (inline ref) or 'Example N of/point/in' (inline ref)
-    pattern = re.compile(
-        r'(Example\s+\d+)'
-        r'(?=\s*:|'          # followed by colon
-        r'\s+[A-Z0-9])',     # OR space + uppercase/digit (company name/year)
-        re.IGNORECASE
-    )
+    try:
+        import zipfile
+        from xml.etree import ElementTree as ET
+        with zipfile.ZipFile(file_path) as z:
+            with z.open("word/document.xml") as f:
+                xml_content = f.read().decode("utf-8")
+    except Exception as e:
+        logger.warning(f"Cannot open docx {file_path}: {e}")
+        return []
 
-    # Find all valid heading positions
-    headings = []
-    for m in pattern.finditer(text):
-        pos = m.start()
-        after = text[m.end():m.end()+30]
-        # Exclude inline refs: 'Example N of', 'Example N point', 'Example N,'
-        if re.match(r'\s*(of|point|,|\.)', after, re.IGNORECASE):
-            continue
-        num_match = re.search(r'\d+', m.group())
-        n = int(num_match.group()) if num_match else 0
-        headings.append((pos, m.end(), n))
+    # Parse XML — extract paragraphs with their style
+    ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+    try:
+        root = ET.fromstring(xml_content)
+    except Exception as e:
+        logger.warning(f"Cannot parse XML {file_path}: {e}")
+        return []
 
+    paragraphs = []  # list of (style_name, text)
+    for para in root.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'):
+        # Get style
+        style = ''
+        pPr = para.find('.//w:pStyle', ns)
+        if pPr is not None:
+            style = pPr.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '')
+        # Get text
+        texts = []
+        for r in para.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t'):
+            if r.text:
+                texts.append(r.text)
+        text = ''.join(texts).strip()
+        if text:
+            paragraphs.append((style, text))
+
+    # Find heading paragraphs that match 'Example N:'
+    heading_styles = {'Heading2', 'heading2', '2', 'Heading 2'}
+    example_pattern = re.compile(r'^Example\s+\d+\s*:', re.IGNORECASE)
+
+    # Strategy 1: Use Heading 2 style
+    heading_indices = [
+        i for i, (style, text) in enumerate(paragraphs)
+        if style in heading_styles and example_pattern.match(text)
+    ]
+
+    # Strategy 2: Fallback — 'Example N:' anywhere in plain text (no heading style required)
+    if not heading_indices:
+        logger.info(f"No Heading2 found in {file_path}, falling back to colon pattern")
+        heading_indices = [
+            i for i, (style, text) in enumerate(paragraphs)
+            if example_pattern.match(text)
+        ]
+
+    if not heading_indices:
+        logger.warning(f"No examples found in {file_path}")
+        return []
+
+    # Build examples: heading paragraph + all content until next heading
     examples = []
-    for idx, (start, end, n) in enumerate(headings):
-        # Content goes from after heading to start of next heading (or end of text)
-        next_start = headings[idx + 1][0] if idx + 1 < len(headings) else len(text)
-        content = text[start:next_start].strip()
+    for idx, hi in enumerate(heading_indices):
+        heading_text = paragraphs[hi][1]
+        num_match = re.search(r'\d+', heading_text)
+        example_number = int(num_match.group()) if num_match else (idx + 1)
+        title = f"Example {example_number}"
+
+        # Collect content paragraphs until next heading
+        next_hi = heading_indices[idx + 1] if idx + 1 < len(heading_indices) else len(paragraphs)
+        content_parts = [heading_text]
+        for pi in range(hi + 1, next_hi):
+            content_parts.append(paragraphs[pi][1])
+        content = ' '.join(content_parts).strip()
+
         if len(content) < 50:
             continue
-        title = f"Example {n}"
+
         examples.append({
-            "example_number": n,
+            "example_number": example_number,
             "title": title,
             "content": content,
         })
