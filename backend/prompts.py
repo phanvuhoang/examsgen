@@ -11,6 +11,7 @@ MCQ_PROMPT = """Generate {count} MCQ question(s) for Part 1 of ACCA TX(VNM).
 
 EXAM SESSION: {exam_session}
 TAX TYPE: {sac_thue}
+{session_vars}
 {syllabus_codes_instruction}
 {difficulty_instruction}
 {custom_instructions}
@@ -34,10 +35,16 @@ REQUIREMENTS:
 - Each option requires a calculation or multi-step reasoning — never a simple recall answer
 - Distractors must be plausible common mistakes (wrong rate, missed condition, incorrect formula)
 - Correct answer includes full step-by-step working
-- Each distractor includes a brief explanation of why it is wrong
+- For any question involving calculations, the correct answer MUST include explicit step-by-step workings:
+  Step 1: [describe what you are calculating] → VND X million
+  Step 2: [next step] → VND Y million
+  Final answer: VND Z million
+- Each calculation step must show the formula, the numbers substituted, and the result
+- Wrong answer explanations must also show the calculation the student mistakenly performed and why it gives the wrong result
+- Never just state the final number — always show how it was derived
 - Cite specific Article and Regulation in the correct answer
-- In the correct answer explanation, include a line: "Syllabus items tested: [list codes and topic names, e.g. CIT-2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
-- At the end of each question, list: Syllabus codes tested: [e.g. CIT-2d, CIT-2e]
+- In the correct answer explanation, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
+- At the end of each question, list: Syllabus codes tested: [e.g. C2d, C2n]
 
 OUTPUT FORMAT — return ONLY valid JSON, no markdown, no extra text:
 {{
@@ -54,7 +61,7 @@ OUTPUT FORMAT — return ONLY valid JSON, no markdown, no extra text:
       "options": {{
         "A": {{"text": "VND X million", "is_key": false, "explanation": "Wrong because..."}},
         "B": {{"text": "VND Y million", "is_key": false, "explanation": "Wrong because..."}},
-        "C": {{"text": "VND Z million", "is_key": true, "working": "Step 1: ... Step 2: ...", "explanation": "Correct per Article X, Decree Y"}},
+        "C": {{"text": "VND Z million", "is_key": true, "working": "Step 1: [formula + numbers] → VND X million\nStep 2: [next step] → VND Y million\nFinal answer: VND Z million", "explanation": "Correct per Article X, Decree Y\nSyllabus items tested: C2d: Depreciation of fixed assets"}},
         "D": {{"text": "VND W million", "is_key": false, "explanation": "Wrong because..."}}
       }},
       "regulation_refs": ["Article 9, Decree 320/2025/ND-CP"]
@@ -68,6 +75,7 @@ SCENARIO_SYSTEM = "You are a senior ACCA TX(VNM) examiner. Generate exam-standar
 
 SCENARIO_PROMPT = """Generate Question {question_number} — a {marks}-mark scenario question on {sac_thue} for the {exam_session} exam.
 
+{session_vars}
 {syllabus_codes_instruction}
 {difficulty_instruction}
 {industry_instruction}
@@ -79,7 +87,12 @@ STRUCTURE:
 - Marks per sub-question shown in brackets, summing to exactly {marks}
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include full marking scheme at the end
-- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. CIT-2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
+- For any sub-question involving calculations, include explicit step-by-step workings in the answer:
+  Step 1: [describe what you are calculating] → VND X million
+  Step 2: [next step] → VND Y million
+  Final answer: VND Z million
+- Each calculation step must show the formula, the numbers substituted, and the result — never just state the final number
+- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
 
 TAX RATES:
 {tax_rates}
@@ -124,6 +137,7 @@ LONGFORM_SYSTEM = SCENARIO_SYSTEM
 
 LONGFORM_PROMPT = """Generate Question {question_number} — a {marks}-mark long-form scenario question on {sac_thue} for the {exam_session} exam.
 
+{session_vars}
 {syllabus_codes_instruction}
 {difficulty_instruction}
 {custom_instructions}
@@ -135,7 +149,12 @@ STRUCTURE:
 - Mix of CALCULATION and WRITTEN EXPLANATION sub-questions
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include detailed marking scheme showing each individual mark
-- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. CIT-2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
+- For any sub-question involving calculations, include explicit step-by-step workings in the answer:
+  Step 1: [describe what you are calculating] → VND X million
+  Step 2: [next step] → VND Y million
+  Final answer: VND Z million
+- Each calculation step must show the formula, the numbers substituted, and the result — never just state the final number
+- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
 
 TAX RATES:
 {tax_rates}
@@ -177,11 +196,14 @@ Return ONLY valid JSON in this exact format:
 Make it COMPLEX — multiple interrelated issues requiring deep understanding of {sac_thue} regulations."""
 
 
-def build_syllabus_instruction(syllabus_codes: list) -> str:
-    if not syllabus_codes:
-        return ""
-    codes_str = ", ".join(syllabus_codes)
-    return f"SYLLABUS CODES TO TARGET: {codes_str}\nThe question(s) MUST test these specific syllabus items."
+def build_syllabus_instruction(syllabus_codes: list, codes_from_file: list = None) -> str:
+    parts = []
+    if codes_from_file:
+        parts.append(f"AVAILABLE SYLLABUS CODES (tag questions using EXACTLY these codes): {', '.join(codes_from_file)}")
+    if syllabus_codes:
+        codes_str = ", ".join(syllabus_codes)
+        parts.append(f"SYLLABUS CODES TO TARGET: {codes_str}\nThe question(s) MUST test these specific syllabus items.")
+    return "\n".join(parts)
 
 
 def build_difficulty_instruction(difficulty: str, topics: list = None) -> str:

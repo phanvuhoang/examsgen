@@ -1,7 +1,7 @@
 import os
 import shutil
 import logging
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 from backend.database import get_db
@@ -153,6 +153,21 @@ async def upload_file(
         """, (session_id, file_type, tax_type, exam_type, name, file.filename, rel_path, len(content)))
         file_id = cur.fetchone()[0]
 
+    if file_type == "sample":
+        from backend.document_extractor import parse_sample_examples
+        full_path = os.path.join(DATA_DIR, rel_path)
+        examples = parse_sample_examples(full_path)
+        if examples:
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM sample_examples WHERE file_id = %s", (file_id,))
+                for ex in examples:
+                    cur.execute("""
+                        INSERT INTO sample_examples (session_id, file_id, example_number, title, content, tax_type, exam_type)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (session_id, file_id, ex["example_number"], ex["title"], ex["content"], tax_type, exam_type))
+            logger.info(f"Parsed {len(examples)} examples from {file.filename}")
+
     return {"id": file_id, "file_name": file.filename, "file_path": rel_path}
 
 
@@ -225,6 +240,155 @@ def carry_forward(session_id: int, data: dict):
         copied += 1
 
     return {"ok": True, "copied": copied}
+
+
+@router.get("/{session_id}/examples")
+def list_sample_examples(session_id: int, sac_thue: str = None, exam_type: str = None):
+    """List parsed sample examples for a session, optionally filtered."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        query = """
+            SELECT se.id, se.file_id, se.example_number, se.title,
+                   LEFT(se.content, 200) as preview,
+                   se.syllabus_codes, se.tax_type, se.exam_type,
+                   sf.display_name as file_name
+            FROM sample_examples se
+            JOIN session_files sf ON se.file_id = sf.id
+            WHERE se.session_id = %s
+        """
+        params = [session_id]
+        if sac_thue:
+            query += " AND se.tax_type = %s"
+            params.append(sac_thue)
+        if exam_type:
+            query += " AND se.exam_type = %s"
+            params.append(exam_type)
+        query += " ORDER BY se.tax_type, se.exam_type, se.example_number"
+        cur.execute(query, params)
+        rows = cur.fetchall()
+    return [
+        {
+            "id": r[0], "file_id": r[1], "example_number": r[2],
+            "title": r[3], "preview": r[4], "syllabus_codes": r[5] or [],
+            "tax_type": r[6], "exam_type": r[7], "file_name": r[8],
+        }
+        for r in rows
+    ]
+
+
+@router.get("/{session_id}/examples/{example_id}/full")
+def get_example_full(session_id: int, example_id: int):
+    """Get full content of a specific example."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT content, title, syllabus_codes FROM sample_examples WHERE id = %s AND session_id = %s",
+                    (example_id, session_id))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Example not found")
+    return {"content": row[0], "title": row[1], "syllabus_codes": row[2] or []}
+
+
+@router.post("/{session_id}/examples/{example_id}/tag")
+def tag_example_with_ai(session_id: int, example_id: int):
+    """Use AI to tag this example with syllabus codes."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT content, tax_type FROM sample_examples WHERE id = %s AND session_id = %s",
+                    (example_id, session_id))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Example not found")
+
+    content, tax_type = row
+    from backend.ai_provider import call_ai
+    import json as _json
+    prompt = f"""Read this ACCA TX(VNM) exam question and identify which ACCA syllabus codes it tests.
+
+TAX TYPE: {tax_type}
+
+QUESTION:
+{content[:2000]}
+
+Return ONLY a JSON array of syllabus code strings, e.g.: ["C2d", "C2n", "C3a"]
+Use the short code format (e.g. C2d, P4a, V2b) — not verbose descriptions.
+Return [] if you cannot determine the codes."""
+
+    result = call_ai(prompt, model_tier="fast")
+    try:
+        text = result["content"].strip()
+        import re as _re
+        match = _re.search(r'\[.*?\]', text, _re.DOTALL)
+        codes = _json.loads(match.group()) if match else []
+    except Exception:
+        codes = []
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE sample_examples SET syllabus_codes = %s WHERE id = %s",
+                    (codes, example_id))
+    return {"syllabus_codes": codes}
+
+
+@router.post("/{session_id}/examples/tag-all")
+def tag_all_examples(session_id: int, background_tasks: BackgroundTasks):
+    """Queue AI tagging for all untagged examples in this session."""
+    def _tag_all():
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM sample_examples WHERE session_id = %s AND (syllabus_codes IS NULL OR syllabus_codes = '{}')",
+                        (session_id,))
+            ids = [r[0] for r in cur.fetchall()]
+        for eid in ids:
+            try:
+                tag_example_with_ai(session_id, eid)
+            except Exception as e:
+                logger.warning(f"Tag failed for example {eid}: {e}")
+    background_tasks.add_task(_tag_all)
+    return {"message": f"Tagging queued for session {session_id}"}
+
+
+@router.get("/{session_id}/variables")
+def list_variables(session_id: int):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, var_key, var_label, var_value, var_unit, description
+            FROM session_variables WHERE session_id = %s ORDER BY id
+        """, (session_id,))
+        rows = cur.fetchall()
+    return [{"id": r[0], "key": r[1], "label": r[2], "value": r[3], "unit": r[4], "description": r[5]} for r in rows]
+
+
+@router.post("/{session_id}/variables")
+def create_variable(session_id: int, data: dict):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO session_variables (session_id, var_key, var_label, var_value, var_unit, description)
+            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+        """, (session_id, data["key"], data["label"], data["value"], data.get("unit", ""), data.get("description", "")))
+        new_id = cur.fetchone()[0]
+    return {"id": new_id}
+
+
+@router.put("/{session_id}/variables/{var_id}")
+def update_variable(session_id: int, var_id: int, data: dict):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE session_variables SET var_label=%s, var_value=%s, var_unit=%s, description=%s
+            WHERE id=%s AND session_id=%s
+        """, (data["label"], data["value"], data.get("unit", ""), data.get("description", ""), var_id, session_id))
+    return {"ok": True}
+
+
+@router.delete("/{session_id}/variables/{var_id}")
+def delete_variable(session_id: int, var_id: int):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM session_variables WHERE id=%s AND session_id=%s", (var_id, session_id))
+    return {"ok": True}
 
 
 @router.get("/{session_id}/samples/preview")

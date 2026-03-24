@@ -1,6 +1,48 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api'
 
+function VariableRow({ variable, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState({
+    label: variable.label,
+    value: variable.value,
+    unit: variable.unit || '',
+    description: variable.description || '',
+  })
+
+  if (editing) {
+    return (
+      <div className="border rounded-lg p-3 bg-white space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })}
+            className="col-span-2 border rounded px-2 py-1 text-xs" placeholder="Label" />
+          <input value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })}
+            className="border rounded px-2 py-1 text-xs" placeholder="Value" />
+          <input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}
+            className="border rounded px-2 py-1 text-xs" placeholder="Unit" />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={async () => { await onUpdate(form); setEditing(false) }}
+            className="text-xs px-3 py-1 bg-brand-500 text-white rounded">Save</button>
+          <button onClick={() => setEditing(false)} className="text-xs px-3 py-1 border rounded">Cancel</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-3 border rounded-lg px-3 py-2 bg-white text-xs">
+      <div className="flex-1 min-w-0">
+        <span className="font-medium text-gray-700">{variable.label}</span>
+        <span className="ml-2 font-mono text-brand-600">{variable.value}</span>
+        {variable.unit && <span className="ml-1 text-gray-400">{variable.unit}</span>}
+      </div>
+      <button onClick={() => setEditing(true)} className="text-gray-400 hover:text-gray-700 px-1">✎</button>
+      <button onClick={onDelete} className="text-red-400 hover:text-red-600 px-1">✕</button>
+    </div>
+  )
+}
+
 export default function Sessions() {
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -10,6 +52,9 @@ export default function Sessions() {
   const [carryFromId, setCarryFromId] = useState('')
   const [saving, setSaving] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [variables, setVariables] = useState([])
+  const [newVar, setNewVar] = useState({ key: '', label: '', value: '', unit: '', description: '' })
+  const [addingVar, setAddingVar] = useState(false)
 
   const fetchSessions = async () => {
     try {
@@ -20,6 +65,14 @@ export default function Sessions() {
   }
 
   useEffect(() => { fetchSessions() }, [])
+
+  useEffect(() => {
+    if (editSession?.id) {
+      api.getSessionVariables(editSession.id).then(setVariables).catch(() => setVariables([]))
+    } else {
+      setVariables([])
+    }
+  }, [editSession])
 
   const handleNew = () => {
     setEditSession(null)
@@ -122,6 +175,72 @@ export default function Sessions() {
                   {sessions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
                 <p className="text-xs text-gray-400 mt-1">Copies all uploaded files from the selected session</p>
+              </div>
+            )}
+            {editSession && (
+              <div className="col-span-2 border-t pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    Global Variables
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setAddingVar(true)}
+                    className="text-xs px-2 py-1 bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100"
+                  >
+                    + Add Variable
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {variables.map((v) => (
+                    <VariableRow
+                      key={v.id}
+                      variable={v}
+                      onUpdate={async (data) => {
+                        await api.updateSessionVariable(editSession.id, v.id, data)
+                        api.getSessionVariables(editSession.id).then(setVariables)
+                      }}
+                      onDelete={async () => {
+                        await api.deleteSessionVariable(editSession.id, v.id)
+                        setVariables(prev => prev.filter(x => x.id !== v.id))
+                      }}
+                    />
+                  ))}
+                  {addingVar && (
+                    <div className="border rounded-lg p-3 bg-gray-50 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <input placeholder="Key (e.g. exchange_rate_usd_vnd)" value={newVar.key}
+                          onChange={(e) => setNewVar({ ...newVar, key: e.target.value })}
+                          className="col-span-2 border rounded px-2 py-1 text-xs" />
+                        <input placeholder="Label (e.g. Exchange Rate 1 USD = ? VND)" value={newVar.label}
+                          onChange={(e) => setNewVar({ ...newVar, label: e.target.value })}
+                          className="col-span-2 border rounded px-2 py-1 text-xs" />
+                        <input placeholder="Value (e.g. 25,450)" value={newVar.value}
+                          onChange={(e) => setNewVar({ ...newVar, value: e.target.value })}
+                          className="border rounded px-2 py-1 text-xs" />
+                        <input placeholder="Unit (e.g. VND)" value={newVar.unit}
+                          onChange={(e) => setNewVar({ ...newVar, unit: e.target.value })}
+                          className="border rounded px-2 py-1 text-xs" />
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            await api.createSessionVariable(editSession.id, newVar)
+                            api.getSessionVariables(editSession.id).then(setVariables)
+                            setNewVar({ key: '', label: '', value: '', unit: '', description: '' })
+                            setAddingVar(false)
+                          }}
+                          className="text-xs px-3 py-1 bg-brand-500 text-white rounded hover:bg-brand-600"
+                        >Save</button>
+                        <button onClick={() => setAddingVar(false)}
+                          className="text-xs px-3 py-1 border rounded hover:bg-gray-100">Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-2">
+                  Variables are injected into every prompt for this session (exchange rates, salary caps, etc.)
+                </p>
               </div>
             )}
           </div>

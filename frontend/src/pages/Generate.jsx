@@ -24,7 +24,7 @@ export default function Generate() {
   const [showCustom, setShowCustom] = useState(false)
   const [referenceId, setReferenceId] = useState('')
   const [referenceOptions, setReferenceOptions] = useState([])
-  const [samplePreviews, setSamplePreviews] = useState([])
+  const [sampleExamples, setSampleExamples] = useState([])
 
   const [sessions, setSessions] = useState([])
   const [sessionId, setSessionId] = useState(null)
@@ -70,12 +70,11 @@ export default function Generate() {
   }, [type, sac_thue])
 
   useEffect(() => {
-    if (!sessionId || !type || !sac_thue) return
-    const examTypeMap = { mcq: 'MCQ', scenario: 'Scenario', longform: 'Longform' }
-    api.getSamplePreviews({ session_id: sessionId, sac_thue, exam_type: examTypeMap[type] || 'MCQ' })
-      .then(setSamplePreviews)
-      .catch(() => setSamplePreviews([]))
-  }, [sessionId, type, sac_thue])
+    if (!sessionId || !sac_thue) return
+    api.getSampleExamples(sessionId, { sac_thue })
+      .then(setSampleExamples)
+      .catch(() => setSampleExamples([]))
+  }, [sessionId, sac_thue])
 
   const parseSyllabusCodes = () => {
     if (!syllabusCodes.trim()) return null
@@ -329,7 +328,7 @@ export default function Generate() {
                 {referenceOptions.length > 0 && (
                   <div>
                     <label className="block text-sm font-medium mb-2">Based on question from bank</label>
-                    <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
+                    <div className="space-y-1 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
                       <div
                         onClick={() => setReferenceId('')}
                         className={`cursor-pointer rounded-lg px-3 py-2 text-sm border transition-all ${
@@ -339,60 +338,41 @@ export default function Generate() {
                         <span className="text-gray-400 italic">— None —</span>
                       </div>
                       {referenceOptions.map((q) => (
-                        <div
+                        <ReferenceCard
                           key={q.id}
-                          onClick={() => setReferenceId(String(q.id))}
-                          className={`cursor-pointer rounded-lg px-3 py-2 text-sm border transition-all ${
-                            referenceId === String(q.id)
-                              ? 'border-brand-500 bg-brand-50'
-                              : 'border-transparent hover:bg-white hover:border-gray-200'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded">
-                              {q.question_type?.replace('_10', '').replace('_15', '')}
-                            </span>
-                            <span className="bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5 rounded">
-                              {q.sac_thue}
-                            </span>
-                            <span className="text-xs text-gray-400 ml-auto">{q.created_at}</span>
-                          </div>
-                          {q.snippet && (
-                            <p className="text-xs text-gray-600 truncate">{q.snippet}</p>
-                          )}
-                        </div>
+                          question={q}
+                          selected={referenceId === String(q.id)}
+                          onSelect={() => setReferenceId(referenceId === String(q.id) ? '' : String(q.id))}
+                        />
                       ))}
                     </div>
                   </div>
                 )}
 
-                {samplePreviews.length > 0 && (
+                {sampleExamples.length > 0 && (
                   <div>
                     <label className="block text-sm font-medium mb-2">
                       Sample Examples in Knowledge Base
                       <span className="text-xs text-gray-400 font-normal ml-2">
-                        ({sac_thue} · {type?.toUpperCase()})
+                        {sampleExamples.length} examples · {sac_thue}
                       </span>
                     </label>
-                    <div className="space-y-2">
-                      {samplePreviews.map((s, i) => (
-                        <div key={i} className="border rounded-lg p-3 bg-gray-50 text-xs">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-semibold text-gray-700">{s.name}</span>
-                            <span className="bg-orange-100 text-orange-700 font-semibold px-2 py-0.5 rounded">
-                              {s.exam_type}
-                            </span>
-                          </div>
-                          {s.preview && (
-                            <p className="text-gray-500 leading-relaxed whitespace-pre-wrap font-mono text-[11px] max-h-24 overflow-y-auto">
-                              {s.preview}
-                            </p>
-                          )}
-                        </div>
+                    <div className="space-y-1 max-h-56 overflow-y-auto border rounded-lg p-2 bg-gray-50">
+                      {sampleExamples.map((ex) => (
+                        <ExampleCard
+                          key={ex.id}
+                          example={ex}
+                          sessionId={sessionId}
+                          onSelect={(content) => {
+                            setCustomInstructions(content)
+                            setShowCustom(true)
+                          }}
+                        />
                       ))}
                     </div>
                     <p className="text-xs text-gray-400 mt-1">
-                      These examples are automatically used as style references when generating.
+                      Click an example to use as style reference in Custom Instructions.
+                      The full sample file is still used automatically for context.
                     </p>
                   </div>
                 )}
@@ -477,6 +457,98 @@ export default function Generate() {
           sac_thue={sac_thue}
           type={type}
         />
+      )}
+    </div>
+  )
+}
+
+function ExampleCard({ example, sessionId, onSelect }) {
+  const [hoverContent, setHoverContent] = useState(null)
+  const [showTooltip, setShowTooltip] = useState(false)
+
+  const handleMouseEnter = async () => {
+    setShowTooltip(true)
+    if (!hoverContent) {
+      try {
+        const res = await api.getExampleFull(sessionId, example.id)
+        setHoverContent(res.content?.slice(0, 1000) + (res.content?.length > 1000 ? '...' : ''))
+      } catch { setHoverContent(example.preview) }
+    }
+  }
+
+  return (
+    <div className="relative">
+      <div
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setShowTooltip(false)}
+        onClick={async () => {
+          const res = await api.getExampleFull(sessionId, example.id)
+          onSelect(res.content)
+        }}
+        className="cursor-pointer flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white hover:border-gray-200 border border-transparent transition-all"
+      >
+        <span className="text-xs font-medium text-gray-700 flex-1 truncate">{example.title}</span>
+        {example.syllabus_codes?.length > 0 && (
+          <div className="flex gap-1 shrink-0">
+            {example.syllabus_codes.slice(0, 3).map(c => (
+              <span key={c} className="text-xs bg-green-100 text-green-700 px-1 rounded font-mono">{c}</span>
+            ))}
+            {example.syllabus_codes.length > 3 && (
+              <span className="text-xs text-gray-400">+{example.syllabus_codes.length - 3}</span>
+            )}
+          </div>
+        )}
+      </div>
+      {showTooltip && hoverContent && (
+        <div className="absolute z-50 left-full ml-2 top-0 w-96 bg-white border border-gray-200 shadow-xl rounded-lg p-3 text-xs text-gray-600 whitespace-pre-wrap font-mono leading-relaxed max-h-72 overflow-y-auto">
+          {hoverContent}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ReferenceCard({ question, selected, onSelect }) {
+  const [hoverContent, setHoverContent] = useState(null)
+  const [showTooltip, setShowTooltip] = useState(false)
+
+  const handleMouseEnter = async () => {
+    setShowTooltip(true)
+    if (!hoverContent) {
+      try {
+        const res = await api.getQuestionPreview(question.id)
+        setHoverContent(res.preview)
+      } catch { setHoverContent(question.snippet) }
+    }
+  }
+
+  return (
+    <div className="relative">
+      <div
+        onClick={onSelect}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setShowTooltip(false)}
+        className={`cursor-pointer rounded-lg px-3 py-2 text-sm border transition-all ${
+          selected ? 'border-brand-500 bg-brand-50' : 'border-transparent hover:bg-white hover:border-gray-200'
+        }`}
+      >
+        <div className="flex items-center gap-2 mb-0.5">
+          <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded">
+            {question.question_type?.replace('_10', '').replace('_15', '')}
+          </span>
+          <span className="bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5 rounded">
+            {question.sac_thue}
+          </span>
+          <span className="text-xs text-gray-400 ml-auto">{question.created_at}</span>
+        </div>
+        {question.snippet && (
+          <p className="text-xs text-gray-500 truncate">{question.snippet}</p>
+        )}
+      </div>
+      {showTooltip && hoverContent && (
+        <div className="absolute z-50 left-full ml-2 top-0 w-96 bg-white border border-gray-200 shadow-xl rounded-lg p-3 text-xs text-gray-600 whitespace-pre-wrap font-mono leading-relaxed max-h-72 overflow-y-auto">
+          {hoverContent}
+        </div>
       )}
     </div>
   )

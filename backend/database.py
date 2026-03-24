@@ -282,6 +282,54 @@ def init_db():
         # v3: questions table — syllabus_codes already added in v2 migration above
         # (kept as-is)
 
+        # v3.4: sample_examples table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS sample_examples (
+                id SERIAL PRIMARY KEY,
+                session_id INTEGER REFERENCES exam_sessions(id) ON DELETE CASCADE,
+                file_id INTEGER REFERENCES session_files(id) ON DELETE CASCADE,
+                example_number INTEGER NOT NULL,
+                title VARCHAR(200),
+                content TEXT NOT NULL,
+                syllabus_codes TEXT[],
+                tax_type VARCHAR(20),
+                exam_type VARCHAR(20),
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_sample_examples_session ON sample_examples(session_id);
+            CREATE INDEX IF NOT EXISTS idx_sample_examples_file ON sample_examples(file_id);
+        """)
+
+        # v3.4: session_variables table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS session_variables (
+                id SERIAL PRIMARY KEY,
+                session_id INTEGER REFERENCES exam_sessions(id) ON DELETE CASCADE,
+                var_key VARCHAR(100) NOT NULL,
+                var_label VARCHAR(200) NOT NULL,
+                var_value VARCHAR(500) NOT NULL,
+                var_unit VARCHAR(50),
+                description TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE (session_id, var_key)
+            );
+        """)
+
+        # Seed default variables for existing sessions
+        cur.execute("""
+            INSERT INTO session_variables (session_id, var_key, var_label, var_value, var_unit, description)
+            SELECT id, 'exchange_rate_usd_vnd', 'Exchange Rate (1 USD = ? VND)', '25,450', 'VND',
+                   'Used to convert USD amounts to VND in calculations'
+            FROM exam_sessions
+            ON CONFLICT (session_id, var_key) DO NOTHING;
+
+            INSERT INTO session_variables (session_id, var_key, var_label, var_value, var_unit, description)
+            SELECT id, 'min_salary_si', 'Minimum Salary for Social/Health Insurance', '4,960,000', 'VND/month',
+                   'Base for calculating compulsory SI/HI contributions'
+            FROM exam_sessions
+            ON CONFLICT (session_id, var_key) DO NOTHING;
+        """)
+
         # Create session folders on disk
         cur.execute("SELECT folder_path FROM exam_sessions WHERE folder_path IS NOT NULL")
         for (fp,) in cur.fetchall():

@@ -104,7 +104,7 @@ def generate_mcq(req: MCQGenerateRequest):
             raise HTTPException(400, "No exam session configured. Please create a session first.")
 
         ctx = build_context(session_id, req.sac_thue, "MCQ")
-        syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [])
+        syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [], codes_from_file=ctx.get("syllabus_codes_list", []))
         diff_instr = build_difficulty_instruction(req.difficulty, req.topics)
         custom_block = get_reference_content(
             reference_question_id=req.reference_question_id,
@@ -115,6 +115,7 @@ def generate_mcq(req: MCQGenerateRequest):
             count=req.count,
             sac_thue=req.sac_thue,
             exam_session=req.exam_session,
+            session_vars=ctx.get("session_vars", ""),
             tax_rates=ctx["tax_rates"],
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
@@ -174,7 +175,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             raise HTTPException(400, "No exam session configured. Please create a session first.")
 
         ctx = build_context(session_id, req.sac_thue, "SCENARIO_10")
-        syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [])
+        syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [], codes_from_file=ctx.get("syllabus_codes_list", []))
         diff_instr = build_difficulty_instruction(req.difficulty)
         industry_instr = f"Set the scenario in the {req.scenario_industry} industry." if req.scenario_industry else ""
         custom_block = get_reference_content(
@@ -187,6 +188,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             sac_thue=req.sac_thue,
             marks=req.marks,
             exam_session=req.exam_session,
+            session_vars=ctx.get("session_vars", ""),
             tax_rates=ctx["tax_rates"],
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
@@ -242,7 +244,7 @@ def generate_longform(req: LongformGenerateRequest):
             raise HTTPException(400, "No exam session configured. Please create a session first.")
 
         ctx = build_context(session_id, req.sac_thue, "LONGFORM_15")
-        syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [])
+        syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [], codes_from_file=ctx.get("syllabus_codes_list", []))
         diff_instr = build_difficulty_instruction(req.difficulty)
         custom_block = get_reference_content(
             reference_question_id=req.reference_question_id,
@@ -254,6 +256,7 @@ def generate_longform(req: LongformGenerateRequest):
             sac_thue=req.sac_thue,
             marks=req.marks,
             exam_session=req.exam_session,
+            session_vars=ctx.get("session_vars", ""),
             tax_rates=ctx["tax_rates"],
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],

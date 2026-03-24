@@ -206,6 +206,21 @@ def get_question(question_id: int):
     }
 
 
+@router.get("/{question_id}/preview")
+def get_question_preview(question_id: int):
+    """Return first 1000 chars of question content as plain text."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT content_json, question_type, sac_thue FROM questions WHERE id = %s", (question_id,))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Not found")
+    from backend.context_builder import format_question_as_text
+    content = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    text = format_question_as_text(content)
+    return {"preview": text[:1000] + ("..." if len(text) > 1000 else ""), "question_type": row[1], "sac_thue": row[2]}
+
+
 @router.patch("/{question_id}/star")
 def toggle_star(question_id: int):
     with get_db() as conn:

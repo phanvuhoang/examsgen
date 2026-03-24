@@ -1,6 +1,67 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../api'
 
+function ExampleRow({ example, sessionId, onTagged }) {
+  const [tagging, setTagging] = useState(false)
+  const [showFull, setShowFull] = useState(false)
+  const [fullContent, setFullContent] = useState(null)
+
+  const handleTag = async (e) => {
+    e.stopPropagation()
+    setTagging(true)
+    try {
+      const res = await api.tagExample(sessionId, example.id)
+      onTagged(res.syllabus_codes)
+    } catch { alert('Tagging failed') }
+    finally { setTagging(false) }
+  }
+
+  const handleToggleFull = async () => {
+    if (!showFull && !fullContent) {
+      const res = await api.getExampleFull(sessionId, example.id)
+      setFullContent(res.content)
+    }
+    setShowFull(!showFull)
+  }
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between">
+        <button onClick={handleToggleFull} className="flex-1 text-left">
+          <span className="text-sm font-medium text-gray-700">{example.title}</span>
+          {!showFull && (
+            <p className="text-xs text-gray-400 mt-0.5 truncate">{example.preview}</p>
+          )}
+        </button>
+        <div className="flex items-center gap-2 ml-3 shrink-0">
+          {example.syllabus_codes?.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {example.syllabus_codes.map(c => (
+                <span key={c} className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-mono">
+                  {c}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <button
+              onClick={handleTag}
+              disabled={tagging}
+              className="text-xs px-2 py-1 bg-purple-50 border border-purple-200 text-purple-600 rounded hover:bg-purple-100 disabled:opacity-50"
+            >
+              {tagging ? '...' : '✨ AI Tag'}
+            </button>
+          )}
+        </div>
+      </div>
+      {showFull && fullContent && (
+        <div className="mt-2 p-3 bg-gray-50 rounded text-xs text-gray-600 whitespace-pre-wrap max-h-64 overflow-y-auto font-mono leading-relaxed">
+          {fullContent}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const TAX_TYPES = ['CIT', 'VAT', 'PIT', 'FCT', 'TP', 'TaxAdmin']
 const EXAM_TYPES = ['MCQ', 'Scenario', 'Longform', 'ALL']
 
@@ -186,6 +247,10 @@ export default function Documents() {
   const [activeTab, setActiveTab] = useState('regulation')
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(false)
+  const [examples, setExamples] = useState([])
+  const [examplesLoading, setExamplesLoading] = useState(false)
+  const [expandedFiles, setExpandedFiles] = useState({})
+  const [taggingAll, setTaggingAll] = useState(false)
 
   // Load sessions
   useEffect(() => {
@@ -206,6 +271,17 @@ export default function Documents() {
       .catch(() => setFiles([]))
       .finally(() => setLoading(false))
   }, [sessionId, activeTab])
+
+  // Load examples when sample tab is active
+  useEffect(() => {
+    if (activeTab === 'sample' && sessionId) {
+      setExamplesLoading(true)
+      api.getSampleExamples(sessionId)
+        .then(setExamples)
+        .catch(() => setExamples([]))
+        .finally(() => setExamplesLoading(false))
+    }
+  }, [activeTab, sessionId, files])
 
   const handleDelete = (fileId) => {
     setFiles((prev) => prev.filter((f) => f.id !== fileId))
@@ -328,6 +404,67 @@ export default function Documents() {
               ))}
             </div>
           )}
+
+          {/* Parsed examples section (sample tab only) */}
+          {activeTab === 'sample' && (() => {
+            const examplesByFile = examples.reduce((acc, ex) => {
+              const key = `${ex.file_id}|${ex.file_name}`
+              if (!acc[key]) acc[key] = { file_name: ex.file_name, file_id: ex.file_id, examples: [] }
+              acc[key].examples.push(ex)
+              return acc
+            }, {})
+            return Object.keys(examplesByFile).length > 0 ? (
+              <div className="mt-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-gray-700">Parsed Examples</h4>
+                  <button
+                    onClick={async () => {
+                      setTaggingAll(true)
+                      try { await api.tagAllExamples(sessionId) }
+                      catch { /* background task */ }
+                      finally { setTaggingAll(false) }
+                    }}
+                    disabled={taggingAll}
+                    className="text-xs px-3 py-1 bg-purple-50 border border-purple-200 text-purple-700 rounded-lg hover:bg-purple-100 disabled:opacity-50"
+                  >
+                    {taggingAll ? '⏳ Tagging...' : '✨ AI Tag All'}
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {Object.values(examplesByFile).map(({ file_name, file_id, examples: exs }) => (
+                    <div key={file_id} className="border rounded-lg overflow-hidden">
+                      <button
+                        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left"
+                        onClick={() => setExpandedFiles(prev => ({ ...prev, [file_id]: !prev[file_id] }))}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm">{expandedFiles[file_id] ? '▼' : '▶'}</span>
+                          <span className="text-sm font-medium">{file_name}</span>
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                            {exs.length} examples
+                          </span>
+                        </div>
+                      </button>
+                      {expandedFiles[file_id] && (
+                        <div className="divide-y">
+                          {exs.map((ex) => (
+                            <ExampleRow
+                              key={ex.id}
+                              example={ex}
+                              sessionId={sessionId}
+                              onTagged={(codes) => {
+                                setExamples(prev => prev.map(e => e.id === ex.id ? { ...e, syllabus_codes: codes } : e))
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null
+          })()}
         </>
       )}
     </div>

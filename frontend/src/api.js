@@ -125,6 +125,33 @@ export const api = {
     return request(`/sessions/${session_id}/samples/preview?${params}`)
   },
 
+  getSampleExamples: (session_id, params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/sessions/${session_id}/examples${qs ? `?${qs}` : ''}`)
+  },
+
+  getExampleFull: (session_id, example_id) =>
+    request(`/sessions/${session_id}/examples/${example_id}/full`),
+
+  tagExample: (session_id, example_id) =>
+    request(`/sessions/${session_id}/examples/${example_id}/tag`, { method: 'POST' }),
+
+  tagAllExamples: (session_id) =>
+    request(`/sessions/${session_id}/examples/tag-all`, { method: 'POST' }),
+
+  getQuestionPreview: (question_id) => request(`/questions/${question_id}/preview`),
+
+  getSessionVariables: (session_id) => request(`/sessions/${session_id}/variables`),
+
+  createSessionVariable: (session_id, data) =>
+    request(`/sessions/${session_id}/variables`, { method: 'POST', body: JSON.stringify(data) }),
+
+  updateSessionVariable: (session_id, var_id, data) =>
+    request(`/sessions/${session_id}/variables/${var_id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  deleteSessionVariable: (session_id, var_id) =>
+    request(`/sessions/${session_id}/variables/${var_id}`, { method: 'DELETE' }),
+
   // Export
   exportWord: (questionIds) =>
     request('/export/word', {
