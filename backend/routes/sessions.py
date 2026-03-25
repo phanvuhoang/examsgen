@@ -16,14 +16,16 @@ FILE_TYPES = ["regulation", "syllabus", "rates", "sample"]
 
 class SessionCreate(BaseModel):
     name: str
-    exam_date: Optional[str] = None      # e.g. "Jun2026"
-    assumed_date: Optional[str] = None   # e.g. "1 June 2026"
+    exam_date: Optional[str] = None      # e.g. "Jun2026" (label only)
+    assumed_date: Optional[str] = None   # e.g. "1 June 2026" (assumed today in scenario intro)
+    cutoff_date: Optional[str] = None    # e.g. "31 December 2025"
 
 
 class SessionUpdate(BaseModel):
     name: Optional[str] = None
     exam_date: Optional[str] = None
     assumed_date: Optional[str] = None
+    cutoff_date: Optional[str] = None
 
 
 @router.get("/")
@@ -31,7 +33,7 @@ def list_sessions():
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT s.id, s.name, s.exam_date, s.assumed_date, s.is_default, s.created_at,
+            SELECT s.id, s.name, s.exam_date, s.assumed_date, s.cutoff_date, s.is_default, s.created_at,
                    (SELECT COUNT(*) FROM session_files WHERE session_id = s.id AND is_active = TRUE) as file_count,
                    (SELECT COUNT(*) FROM questions WHERE session_id = s.id) as question_count
             FROM exam_sessions s ORDER BY s.created_at DESC
@@ -46,9 +48,9 @@ def create_session(session: SessionCreate):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO exam_sessions (name, exam_date, assumed_date)
-            VALUES (%s, %s, %s) RETURNING id
-        """, (session.name, session.exam_date, session.assumed_date))
+            INSERT INTO exam_sessions (name, exam_date, assumed_date, cutoff_date)
+            VALUES (%s, %s, %s, %s) RETURNING id
+        """, (session.name, session.exam_date, session.assumed_date, session.cutoff_date))
         return {"id": cur.fetchone()[0]}
 
 

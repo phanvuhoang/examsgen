@@ -48,7 +48,7 @@ export default function Sessions() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editSession, setEditSession] = useState(null)
-  const [form, setForm] = useState({ name: '', exam_date: '', assumed_date: '' })
+  const [form, setForm] = useState({ name: '', exam_date: '', assumed_date: '', cutoff_date: '' })
   const [carryFromId, setCarryFromId] = useState('')
   const [saving, setSaving] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
@@ -76,14 +76,14 @@ export default function Sessions() {
 
   const handleNew = () => {
     setEditSession(null)
-    setForm({ name: '', exam_date: '', assumed_date: '' })
+    setForm({ name: '', exam_date: '', assumed_date: '', cutoff_date: '' })
     setCarryFromId('')
     setShowForm(true)
   }
 
   const handleEdit = (s) => {
     setEditSession(s)
-    setForm({ name: s.name, exam_date: s.exam_date || '', assumed_date: s.assumed_date || '' })
+    setForm({ name: s.name, exam_date: s.exam_date || '', assumed_date: s.assumed_date || '', cutoff_date: s.cutoff_date || '' })
     setShowForm(true)
   }
 
@@ -162,6 +162,16 @@ export default function Sessions() {
                 placeholder="e.g. 1 June 2026"
               />
               <p className="text-xs text-gray-400 mt-1">Used in scenario questions: "Assume today is..."</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1">Cut-off Date</label>
+              <input
+                value={form.cutoff_date}
+                onChange={(e) => setForm({ ...form, cutoff_date: e.target.value })}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                placeholder="e.g. 31 December 2025"
+              />
+              <p className="text-xs text-gray-400 mt-1">Regulations applicable as of this date. Scenarios use this tax year.</p>
             </div>
             {!editSession && sessions.length > 0 && (
               <div className="col-span-2">
@@ -267,8 +277,9 @@ export default function Sessions() {
                     <span className="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full">Active</span>
                   )}
                 </div>
-                <div className="text-xs text-gray-500 mt-1 flex gap-3">
+                <div className="text-xs text-gray-500 mt-1 flex gap-3 flex-wrap">
                   {s.exam_date && <span>Exam: <strong>{s.exam_date}</strong></span>}
+                  {s.cutoff_date && <span>Cut-off: <strong>{s.cutoff_date}</strong></span>}
                   {s.assumed_date && <span>Scenario date: <strong>{s.assumed_date}</strong></span>}
                   <span>{s.file_count || 0} files</span>
                   <span>{s.question_count || 0} questions</span>

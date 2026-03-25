@@ -4,7 +4,7 @@ MCQ_SYSTEM = (
     "Every MCQ requires multi-step calculation or application of law to a fact pattern. "
     "Never test pure recall. "
     "Always cite the specific Article and Regulation in your answer/marking scheme. "
-    "Always tag each question with ACCA syllabus codes tested (e.g. CIT-2d, CIT-2e)."
+    "Always tag each question with ACCA syllabus codes tested (e.g. C2d, C2n)."
 )
 
 MCQ_PROMPT = """Generate {count} MCQ question(s) for Part 1 of ACCA TX(VNM).
@@ -29,22 +29,37 @@ SAMPLE QUESTIONS (replicate this format, difficulty, and exam style EXACTLY):
 {sample_note}
 {sample}
 
-REQUIREMENTS:
-- Each MCQ = exactly 2 marks
-- 4 options (A/B/C/D), exactly one correct answer
-- Each option requires a calculation or multi-step reasoning — never a simple recall answer
-- Distractors must be plausible common mistakes (wrong rate, missed condition, incorrect formula)
-- Correct answer includes full step-by-step working
-- For any question involving calculations, the correct answer MUST include explicit step-by-step workings:
-  Step 1: [describe what you are calculating] → VND X million
-  Step 2: [next step] → VND Y million
-  Final answer: VND Z million
-- Each calculation step must show the formula, the numbers substituted, and the result
-- Wrong answer explanations must also show the calculation the student mistakenly performed and why it gives the wrong result
-- Never just state the final number — always show how it was derived
-- Cite specific Article and Regulation in the correct answer
-- In the correct answer explanation, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
+MARK ALLOCATION RULES (CRITICAL):
+- Minimum 0.5 mark per answerable point
+- A 2-mark MCQ should have EITHER:
+  (a) 4 small calculation/identification points × 0.5 marks each, OR
+  (b) 2 medium calculation points × 1 mark each, OR
+  (c) 1 large calculation point (1 mark) + 2 small points (0.5 marks each)
+- DO NOT create a question requiring 6+ calculation steps for only 2 marks
+- The scenario MUST be solvable in ≤ 4 calculation steps total
+- Keep fact patterns concise — 3-5 data points per MCQ, not 8-10
+
+ANSWER FORMAT RULES:
+- Answers must be CONCISE and CLEAR — like official ACCA marking schemes
+- Show calculations inline: "Annual salary = 50 mil × 9 months = 450 mil (0.5 marks)"
+- When ≥ 3 calculation rows exist, use a markdown table:
+  | Item | Calculation | Amount (mil VND) | Marks |
+  |------|-------------|-----------------|-------|
+  | Annual salary | 50 × 9 | 450 | 0.5 |
+- Each row = one mark point. Show mark allocation per row/point (e.g. 0.5 marks, 1 mark)
+- DO NOT write verbose paragraphs explaining each step
+- DO NOT write "Step 1:", "Step 2:" etc.
+- Final answer line should be bolded or clearly marked
+- For MCQ wrong options: one short sentence explaining the mistake (e.g. "Wrong rate applied: used 20% instead of 22%")
+- Cite regulation reference on a separate line at the end: "Ref: Article X, Decree Y"
+- In the correct answer explanation, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — after the regulation reference
 - At the end of each question, list: Syllabus codes tested: [e.g. C2d, C2n]
+
+TIMELINE RULES:
+- All scenarios, transactions, and company data occur in tax year {tax_year}
+- Apply regulations that were effective as of {cutoff_date}
+- Opening line of scenario uses: "You should assume today is {assumed_date}."
+- Do NOT reference events in years after {tax_year} unless asking about future obligations
 
 OUTPUT FORMAT — return ONLY valid JSON, no markdown, no extra text:
 {{
@@ -55,13 +70,13 @@ OUTPUT FORMAT — return ONLY valid JSON, no markdown, no extra text:
     {{
       "number": 1,
       "marks": 2,
-      "scenario": "On 1 January 2026, ABC Co...",
-      "question": "What is the deductible expense for CIT purposes in the year ended 31 December 2025?",
-      "syllabus_codes": ["CIT-2d", "CIT-2e"],
+      "scenario": "On 1 January {tax_year}, ABC Co...",
+      "question": "What is the deductible expense for CIT purposes in the year ended 31 December {tax_year}?",
+      "syllabus_codes": ["C2d", "C2n"],
       "options": {{
-        "A": {{"text": "VND X million", "is_key": false, "explanation": "Wrong because..."}},
+        "A": {{"text": "VND X million", "is_key": false, "explanation": "Wrong rate applied: used 20% instead of 22%"}},
         "B": {{"text": "VND Y million", "is_key": false, "explanation": "Wrong because..."}},
-        "C": {{"text": "VND Z million", "is_key": true, "working": "Step 1: [formula + numbers] → VND X million\nStep 2: [next step] → VND Y million\nFinal answer: VND Z million", "explanation": "Correct per Article X, Decree Y\nSyllabus items tested: C2d: Depreciation of fixed assets"}},
+        "C": {{"text": "VND Z million", "is_key": true, "working": "Annual salary = 50 mil × 9 = 450 mil (0.5 mk)\nLess insurance = 4.5 mil (0.5 mk)\nNet = 445.5 mil (1 mk)", "explanation": "Correct per Article X, Decree Y\nSyllabus items tested: C2d: Depreciation of fixed assets"}},
         "D": {{"text": "VND W million", "is_key": false, "explanation": "Wrong because..."}}
       }},
       "regulation_refs": ["Article 9, Decree 320/2025/ND-CP"]
@@ -87,12 +102,36 @@ STRUCTURE:
 - Marks per sub-question shown in brackets, summing to exactly {marks}
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include full marking scheme at the end
-- For any sub-question involving calculations, include explicit step-by-step workings in the answer:
-  Step 1: [describe what you are calculating] → VND X million
-  Step 2: [next step] → VND Y million
-  Final answer: VND Z million
-- Each calculation step must show the formula, the numbers substituted, and the result — never just state the final number
-- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
+- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — after the regulation references
+
+MARK GRANULARITY RULES:
+- Minimum 0.5 mark per answerable point
+- Each sub-question's mark allocation must match its actual complexity
+- Example for a 3-mark sub-question:
+  - 3 steps × 1 mark each, OR
+  - 2 steps × 1 mark + 2 items × 0.5 mark, OR
+  - 6 items × 0.5 mark each
+- Do not assign 1 mark to a trivial identification step that takes 5 seconds
+- Do not require 10 calculation steps for a 2-mark question
+
+ANSWER FORMAT RULES:
+- Answers must be CONCISE and CLEAR — like official ACCA marking schemes
+- Show calculations inline: "Annual salary = 50 mil × 9 months = 450 mil (0.5 marks)"
+- When ≥ 3 calculation rows exist, use a markdown table:
+  | Item | Calculation | Amount (mil VND) | Marks |
+  |------|-------------|-----------------|-------|
+  | Annual salary | 50 × 9 | 450 | 0.5 |
+- Each row = one mark point. Show mark allocation per row/point
+- DO NOT write verbose paragraphs explaining each step
+- DO NOT write "Step 1:", "Step 2:" etc.
+- Final answer line should be bolded or clearly marked
+- Cite regulation reference on a separate line at the end: "Ref: Article X, Decree Y"
+
+TIMELINE RULES:
+- All scenarios, transactions, and company data occur in tax year {tax_year}
+- Apply regulations that were effective as of {cutoff_date}
+- Opening line of scenario: "You should assume today is {assumed_date}."
+- Do NOT reference events in years after {tax_year} unless asking about future obligations
 
 TAX RATES:
 {tax_rates}
@@ -114,17 +153,17 @@ Return ONLY valid JSON in this exact format:
   "sac_thue": "{sac_thue}",
   "marks": {marks},
   "exam_session": "{exam_session}",
-  "scenario": "You should assume today is 1 February 2026. ...",
+  "scenario": "You should assume today is {assumed_date}. All transactions occur in tax year {tax_year}. ...",
   "sub_questions": [
     {{
       "label": "(a)",
       "marks": 3,
       "question": "Calculate...",
-      "answer": "Step 1: ...",
+      "answer": "Annual salary = 50 mil × 9 = 450 mil (0.5 mk)\nLess insurance = 4.5 mil (0.5 mk)\nNet = 445.5 mil (1 mk)",
       "marking_scheme": [
-        {{"point": "Identify...", "mark": 1}},
-        {{"point": "Apply...", "mark": 1}},
-        {{"point": "Correct total", "mark": 1}}
+        {{"point": "Annual salary = 50 × 9 = 450 mil", "mark": 0.5}},
+        {{"point": "Less insurance cap = 4.5 mil", "mark": 0.5}},
+        {{"point": "Correct net = 445.5 mil", "mark": 1}}
       ]
     }}
   ],
@@ -149,12 +188,32 @@ STRUCTURE:
 - Mix of CALCULATION and WRITTEN EXPLANATION sub-questions
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include detailed marking scheme showing each individual mark
-- For any sub-question involving calculations, include explicit step-by-step workings in the answer:
-  Step 1: [describe what you are calculating] → VND X million
-  Step 2: [next step] → VND Y million
-  Final answer: VND Z million
-- Each calculation step must show the formula, the numbers substituted, and the result — never just state the final number
-- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — this line must appear AFTER the regulation references
+- In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — after the regulation references
+
+MARK GRANULARITY RULES:
+- Minimum 0.5 mark per answerable point
+- Each sub-question's mark allocation must match its actual complexity
+- Do not assign 1 mark to a trivial identification step that takes 5 seconds
+- Do not require 10 calculation steps for a 2-mark question
+
+ANSWER FORMAT RULES:
+- Answers must be CONCISE and CLEAR — like official ACCA marking schemes
+- Show calculations inline: "Annual salary = 50 mil × 9 months = 450 mil (0.5 marks)"
+- When ≥ 3 calculation rows exist, use a markdown table:
+  | Item | Calculation | Amount (mil VND) | Marks |
+  |------|-------------|-----------------|-------|
+  | Annual salary | 50 × 9 | 450 | 0.5 |
+- Each row = one mark point. Show mark allocation per row/point
+- DO NOT write verbose paragraphs explaining each step
+- DO NOT write "Step 1:", "Step 2:" etc.
+- Final answer line should be bolded or clearly marked
+- Cite regulation reference on a separate line at the end: "Ref: Article X, Decree Y"
+
+TIMELINE RULES:
+- All scenarios, transactions, and company data occur in tax year {tax_year}
+- Apply regulations that were effective as of {cutoff_date}
+- Opening line of scenario: "You should assume today is {assumed_date}."
+- Do NOT reference events in years after {tax_year} unless asking about future obligations
 
 TAX RATES:
 {tax_rates}
@@ -176,17 +235,17 @@ Return ONLY valid JSON in this exact format:
   "sac_thue": "{sac_thue}",
   "marks": {marks},
   "exam_session": "{exam_session}",
-  "scenario": "You should assume today is 1 February 2026. ...",
+  "scenario": "You should assume today is {assumed_date}. All transactions occur in tax year {tax_year}. ...",
   "sub_questions": [
     {{
       "label": "(a)",
       "marks": 3,
       "question": "Calculate...",
-      "answer": "Step 1: ...",
+      "answer": "Annual salary = 50 mil × 9 = 450 mil (0.5 mk)\nLess insurance = 4.5 mil (0.5 mk)\nNet = 445.5 mil (1 mk)",
       "marking_scheme": [
-        {{"point": "Identify...", "mark": 1}},
-        {{"point": "Apply...", "mark": 1}},
-        {{"point": "Correct total", "mark": 1}}
+        {{"point": "Annual salary = 50 × 9 = 450 mil", "mark": 0.5}},
+        {{"point": "Less insurance cap = 4.5 mil", "mark": 0.5}},
+        {{"point": "Correct net = 445.5 mil", "mark": 1}}
       ]
     }}
   ],

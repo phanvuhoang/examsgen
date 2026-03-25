@@ -184,6 +184,19 @@ export default function Generate() {
           </span>
         )}
       </div>
+      {currentSession?.cutoff_date && (() => {
+        const yearMatch = currentSession.cutoff_date.match(/20\d{2}/)
+        const taxYear = yearMatch ? yearMatch[0] : ''
+        return (
+          <div className="flex items-center gap-3 text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-4 py-2 mb-4">
+            {taxYear && <span>Tax year: <strong className="text-blue-700">{taxYear}</strong></span>}
+            <span>Cut-off: <strong className="text-blue-700">{currentSession.cutoff_date}</strong></span>
+            {currentSession.assumed_date && (
+              <span>Assumed today: <strong className="text-blue-700">{currentSession.assumed_date}</strong></span>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Step 1: Type Selection */}
       <div className="mb-6">

@@ -233,19 +233,45 @@ def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
 
     logger.info(f"  total context chars: regulations={len(regulations)}, syllabus={len(syllabus)}, sample={len(sample)}, rates={len(tax_rates)}")
 
-    # 6. Session variables
+    # 6. Session variables + cutoff/date fields
     session_vars_text = ""
+    cutoff_date = ""
+    assumed_date = ""
+    tax_year = ""
     try:
         with get_db() as conn:
             cur = conn.cursor()
+            # Load session date fields
+            cur.execute("""
+                SELECT cutoff_date, assumed_date, exam_date
+                FROM exam_sessions WHERE id = %s
+            """, (session_id,))
+            row = cur.fetchone()
+            if row:
+                cutoff_date = row[0] or ""
+                assumed_date = row[1] or ""
+                # Derive tax year from cutoff_date
+                import re as _re
+                match = _re.search(r'(20\d{2})', cutoff_date)
+                tax_year = match.group(1) if match else ""
+            # Load session variables
             cur.execute("""
                 SELECT var_label, var_value, var_unit
                 FROM session_variables WHERE session_id = %s ORDER BY id
             """, (session_id,))
             variables = [{"label": r[0], "value": r[1], "unit": r[2] or ""} for r in cur.fetchall()]
+
+        parts = []
+        if cutoff_date:
+            parts.append(f"CUTOFF DATE: {cutoff_date}  (regulations applicable as of this date)")
+        if tax_year:
+            parts.append(f"TAX YEAR: {tax_year}  (scenarios happen in this calendar year)")
+        if assumed_date:
+            parts.append(f"ASSUMED TODAY: {assumed_date}  (use as 'You should assume today is...' in scenario intro)")
         if variables:
             var_lines = "\n".join(f"- {v['label']}: {v['value']} {v['unit']}".strip() for v in variables)
-            session_vars_text = f"SESSION VARIABLES (apply these globally to all calculations):\n{var_lines}"
+            parts.append(f"SESSION VARIABLES (apply these globally to all calculations):\n{var_lines}")
+        session_vars_text = "\n".join(parts)
     except Exception as e:
         logger.warning(f"Failed to load session variables: {e}")
 
@@ -257,6 +283,9 @@ def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
         "sample_note": sample_note,
         "syllabus_codes_list": all_syllabus_codes,
         "session_vars": session_vars_text,
+        "cutoff_date": cutoff_date,
+        "assumed_date": assumed_date,
+        "tax_year": tax_year,
     }
 
 

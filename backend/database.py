@@ -260,6 +260,7 @@ def init_db():
         cur.execute("""
             ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS exam_date VARCHAR(20);
             ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS assumed_date VARCHAR(50);
+            ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS cutoff_date VARCHAR(50);
         """)
 
         # v3: session_files table

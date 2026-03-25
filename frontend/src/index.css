@@ -42,3 +42,44 @@ body {
 .question-html .refs {
   @apply text-gray-500 text-xs mt-2;
 }
+
+/* Calculation table */
+.question-html .calc-table {
+  @apply w-full border-collapse my-3 text-sm;
+}
+.question-html .calc-table td,
+.question-html .calc-table th {
+  @apply border border-gray-200 px-3 py-1.5;
+}
+.question-html .calc-table .marks {
+  @apply text-right font-semibold text-brand-600 whitespace-nowrap w-24;
+}
+
+/* Answer block */
+.question-html .answer-block {
+  @apply mt-3 p-4 bg-gray-50 rounded-lg border-l-4 border-brand-400 text-sm;
+}
+
+/* Mark point pill */
+.question-html .mark-point {
+  @apply flex items-start gap-2 py-1 text-gray-700;
+}
+.question-html .mark-pill {
+  @apply shrink-0 bg-brand-100 text-brand-700 text-xs font-bold px-2 py-0.5 rounded-full;
+}
+
+/* Option rows */
+.question-html .option {
+  @apply py-1.5 px-3 my-1 rounded border border-transparent;
+}
+.question-html .option.correct {
+  @apply bg-green-50 border-l-4 border-brand-500;
+}
+.question-html .option.wrong {
+  @apply text-gray-600;
+}
+
+/* Section headers inside question */
+.question-html .section-label {
+  @apply text-xs font-bold uppercase tracking-widest text-gray-400 mt-4 mb-1;
+}
