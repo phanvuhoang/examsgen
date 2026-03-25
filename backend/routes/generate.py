@@ -10,7 +10,7 @@ from backend.prompts import (
     MCQ_SYSTEM, MCQ_PROMPT,
     SCENARIO_SYSTEM, SCENARIO_PROMPT,
     LONGFORM_SYSTEM, LONGFORM_PROMPT,
-    build_syllabus_instruction, build_difficulty_instruction,
+    build_syllabus_instruction, build_difficulty_instruction, build_timeline_block,
 )
 from backend.database import get_db
 from backend.html_renderer import render_question_html
@@ -111,14 +111,15 @@ def generate_mcq(req: MCQGenerateRequest):
             custom_instructions=req.custom_instructions,
         )
 
+        timeline_rules = build_timeline_block(
+            ctx.get("cutoff_date", ""), ctx.get("tax_year", ""), req.assumed_date or ""
+        )
         prompt = MCQ_PROMPT.format(
             count=req.count,
             sac_thue=req.sac_thue,
             exam_session=req.exam_session,
             session_vars=ctx.get("session_vars", ""),
             tax_year=ctx.get("tax_year", ""),
-            cutoff_date=ctx.get("cutoff_date", ""),
-            assumed_date=ctx.get("assumed_date", ""),
             tax_rates=ctx["tax_rates"],
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
@@ -127,6 +128,7 @@ def generate_mcq(req: MCQGenerateRequest):
             syllabus_codes_instruction=syllabus_instr,
             difficulty_instruction=diff_instr,
             custom_instructions=custom_block,
+            timeline_rules=timeline_rules,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=MCQ_SYSTEM, provider=req.provider)
@@ -179,11 +181,14 @@ def generate_scenario(req: ScenarioGenerateRequest):
 
         ctx = build_context(session_id, req.sac_thue, "SCENARIO_10")
         syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [], codes_from_file=ctx.get("syllabus_codes_list", []))
-        diff_instr = build_difficulty_instruction(req.difficulty)
+        diff_instr = build_difficulty_instruction(req.difficulty, req.topics)
         industry_instr = f"Set the scenario in the {req.scenario_industry} industry." if req.scenario_industry else ""
         custom_block = get_reference_content(
             reference_question_id=req.reference_question_id,
             custom_instructions=req.custom_instructions,
+        )
+        timeline_rules = build_timeline_block(
+            ctx.get("cutoff_date", ""), ctx.get("tax_year", ""), req.assumed_date or ""
         )
 
         prompt = SCENARIO_PROMPT.format(
@@ -192,9 +197,6 @@ def generate_scenario(req: ScenarioGenerateRequest):
             marks=req.marks,
             exam_session=req.exam_session,
             session_vars=ctx.get("session_vars", ""),
-            tax_year=ctx.get("tax_year", ""),
-            cutoff_date=ctx.get("cutoff_date", ""),
-            assumed_date=ctx.get("assumed_date", ""),
             tax_rates=ctx["tax_rates"],
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
@@ -205,12 +207,15 @@ def generate_scenario(req: ScenarioGenerateRequest):
             syllabus_codes_instruction=syllabus_instr,
             difficulty_instruction=diff_instr,
             custom_instructions=custom_block,
+            timeline_rules=timeline_rules,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=SCENARIO_SYSTEM, provider=req.provider)
         content_json = parse_ai_json(result["content"])
         content_html = render_question_html(content_json)
         duration_ms = int((time.time() - start) * 1000)
+
+        scenario_codes = list(set(content_json.get("syllabus_codes", []))) or None
 
         q_id = _save_question(
             "SCENARIO_10", req.sac_thue, 2, req.question_number,
@@ -219,6 +224,7 @@ def generate_scenario(req: ScenarioGenerateRequest):
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
             session_id=session_id, user_id=req.user_id,
+            syllabus_codes=scenario_codes,
         )
 
         return {
@@ -251,10 +257,13 @@ def generate_longform(req: LongformGenerateRequest):
 
         ctx = build_context(session_id, req.sac_thue, "LONGFORM_15")
         syllabus_instr = build_syllabus_instruction(req.syllabus_codes or [], codes_from_file=ctx.get("syllabus_codes_list", []))
-        diff_instr = build_difficulty_instruction(req.difficulty)
+        diff_instr = build_difficulty_instruction(req.difficulty, req.topics)
         custom_block = get_reference_content(
             reference_question_id=req.reference_question_id,
             custom_instructions=req.custom_instructions,
+        )
+        timeline_rules = build_timeline_block(
+            ctx.get("cutoff_date", ""), ctx.get("tax_year", ""), req.assumed_date or ""
         )
 
         prompt = LONGFORM_PROMPT.format(
@@ -263,9 +272,6 @@ def generate_longform(req: LongformGenerateRequest):
             marks=req.marks,
             exam_session=req.exam_session,
             session_vars=ctx.get("session_vars", ""),
-            tax_year=ctx.get("tax_year", ""),
-            cutoff_date=ctx.get("cutoff_date", ""),
-            assumed_date=ctx.get("assumed_date", ""),
             tax_rates=ctx["tax_rates"],
             syllabus=ctx["syllabus"],
             regulations=ctx["regulations"],
@@ -274,12 +280,15 @@ def generate_longform(req: LongformGenerateRequest):
             syllabus_codes_instruction=syllabus_instr,
             difficulty_instruction=diff_instr,
             custom_instructions=custom_block,
+            timeline_rules=timeline_rules,
         )
 
         result = call_ai(prompt, model_tier=req.model_tier, system_prompt=LONGFORM_SYSTEM, provider=req.provider)
         content_json = parse_ai_json(result["content"])
         content_html = render_question_html(content_json)
         duration_ms = int((time.time() - start) * 1000)
+
+        longform_codes = list(set(content_json.get("syllabus_codes", []))) or None
 
         q_id = _save_question(
             "LONGFORM_15", req.sac_thue, 3, req.question_number,
@@ -288,6 +297,7 @@ def generate_longform(req: LongformGenerateRequest):
             req.exam_session, duration_ms,
             result["prompt_tokens"], result["completion_tokens"],
             session_id=session_id, user_id=req.user_id,
+            syllabus_codes=longform_codes,
         )
 
         return {

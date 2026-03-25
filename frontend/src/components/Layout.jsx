@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { api } from '../api'
 
 const NAV_ITEMS = [
   { path: '/sessions', label: 'Sessions', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
@@ -11,45 +10,31 @@ const NAV_ITEMS = [
 ]
 
 export default function Layout({ children, onLogout }) {
-  const [sessions, setSessions] = useState([])
-  const [currentSessionId, setCurrentSessionId] = useState(localStorage.getItem('currentSessionId') || '')
-
-  useEffect(() => {
-    api.getSessions().then((data) => {
-      setSessions(data)
-      if (!currentSessionId) {
-        const def = data.find((s) => s.is_default)
-        if (def) {
-          setCurrentSessionId(String(def.id))
-          localStorage.setItem('currentSessionId', String(def.id))
-        }
-      }
-    }).catch(() => {})
-  }, [])
-
-  const handleSessionChange = (id) => {
-    setCurrentSessionId(id)
-    localStorage.setItem('currentSessionId', id)
-    window.dispatchEvent(new Event('storage'))
-  }
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-60 bg-brand-500 text-white flex flex-col shrink-0">
-        <div className="p-4 border-b border-brand-400">
-          <h1 className="text-xl font-bold">ExamsGen</h1>
-          <p className="text-brand-200 text-xs mt-1">ACCA TX(VNM)</p>
-          {sessions.length > 0 && (
-            <select
-              value={currentSessionId}
-              onChange={(e) => handleSessionChange(e.target.value)}
-              className="mt-2 w-full text-xs bg-brand-600 border border-brand-400 rounded px-2 py-1 text-white"
-            >
-              {sessions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+      <aside className={`${sidebarCollapsed ? 'w-14' : 'w-60'} bg-brand-500 text-white flex flex-col shrink-0 transition-all duration-200`}>
+        <div className="p-3 border-b border-brand-400 flex items-center justify-between min-h-[56px]">
+          {!sidebarCollapsed && (
+            <div>
+              <h1 className="text-xl font-bold">ExamsGen</h1>
+              <p className="text-brand-200 text-xs">ACCA TX(VNM)</p>
+            </div>
           )}
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="p-1.5 rounded hover:bg-brand-400 transition-colors ml-auto shrink-0"
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d={sidebarCollapsed ? 'M13 5l7 7-7 7M5 5l7 7-7 7' : 'M4 6h16M4 12h16M4 18h16'} />
+            </svg>
+          </button>
         </div>
+
         <nav className="flex-1 p-2 space-y-1">
           {NAV_ITEMS.map(({ path, label, icon }) => (
             <NavLink
@@ -57,7 +42,7 @@ export default function Layout({ children, onLogout }) {
               to={path}
               end={path === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                `relative flex items-center gap-3 px-2 py-2.5 rounded-lg text-sm transition-colors group ${
                   isActive ? 'bg-brand-600 text-white font-medium' : 'text-brand-100 hover:bg-brand-400'
                 }`
               }
@@ -65,16 +50,26 @@ export default function Layout({ children, onLogout }) {
               <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
               </svg>
-              {label}
+              {!sidebarCollapsed && <span>{label}</span>}
+              {sidebarCollapsed && (
+                <span className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+                  {label}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
-        <div className="p-3 border-t border-brand-400">
+
+        <div className="p-2 border-t border-brand-400">
           <button
             onClick={onLogout}
-            className="w-full text-left px-3 py-2 text-brand-200 hover:text-white text-sm rounded hover:bg-brand-400 transition-colors"
+            className="w-full text-left px-2 py-2 text-brand-200 hover:text-white text-sm rounded hover:bg-brand-400 transition-colors flex items-center gap-3"
           >
-            Logout
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            {!sidebarCollapsed && 'Logout'}
           </button>
         </div>
       </aside>

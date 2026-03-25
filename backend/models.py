@@ -12,13 +12,14 @@ class MCQGenerateRequest(BaseModel):
     topics: Optional[List[str]] = None
     exam_session: str = "Jun2026"
     difficulty: str = "standard"       # standard | hard
-    model_tier: str = "fast"           # fast=sonnet, strong=opus
+    model_tier: str = "haiku"          # haiku=default, fast=sonnet, strong=opus
     provider: Optional[str] = None     # None=auto, "claudible", "anthropic", "openai"
     session_id: Optional[int] = None
     user_id: int = 1
-    syllabus_codes: Optional[List[str]] = None   # e.g. ["CIT-2d", "CIT-2n"]
+    syllabus_codes: Optional[List[str]] = None   # e.g. ["C2d", "C2n"]
     custom_instructions: Optional[str] = None
     reference_question_id: Optional[int] = None
+    assumed_date: Optional[str] = None  # e.g. "1 February 2026"
 
 
 class ScenarioGenerateRequest(BaseModel):
@@ -27,14 +28,16 @@ class ScenarioGenerateRequest(BaseModel):
     marks: int = 10
     exam_session: str = "Jun2026"
     scenario_industry: Optional[str] = None
+    topics: Optional[List[str]] = None
     difficulty: str = "standard"
-    model_tier: str = "strong"
+    model_tier: str = "fast"
     provider: Optional[str] = None
     session_id: Optional[int] = None
     user_id: int = 1
     syllabus_codes: Optional[List[str]] = None
     custom_instructions: Optional[str] = None
     reference_question_id: Optional[int] = None
+    assumed_date: Optional[str] = None
 
 
 class LongformGenerateRequest(BaseModel):
@@ -42,14 +45,16 @@ class LongformGenerateRequest(BaseModel):
     sac_thue: str
     marks: int = 15
     exam_session: str = "Jun2026"
+    topics: Optional[List[str]] = None
     difficulty: str = "standard"
-    model_tier: str = "strong"
+    model_tier: str = "fast"
     provider: Optional[str] = None
     session_id: Optional[int] = None
     user_id: int = 1
     syllabus_codes: Optional[List[str]] = None
     custom_instructions: Optional[str] = None
     reference_question_id: Optional[int] = None
+    assumed_date: Optional[str] = None
 
 
 class RefineRequest(BaseModel):

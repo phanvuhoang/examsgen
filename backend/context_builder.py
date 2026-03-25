@@ -266,8 +266,6 @@ def build_context(session_id: int, sac_thue: str, question_type: str) -> dict:
             parts.append(f"CUTOFF DATE: {cutoff_date}  (regulations applicable as of this date)")
         if tax_year:
             parts.append(f"TAX YEAR: {tax_year}  (scenarios happen in this calendar year)")
-        if assumed_date:
-            parts.append(f"ASSUMED TODAY: {assumed_date}  (use as 'You should assume today is...' in scenario intro)")
         if variables:
             var_lines = "\n".join(f"- {v['label']}: {v['value']} {v['unit']}".strip() for v in variables)
             parts.append(f"SESSION VARIABLES (apply these globally to all calculations):\n{var_lines}")

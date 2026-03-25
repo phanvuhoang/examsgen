@@ -13,12 +13,13 @@ export default function Generate() {
   const [sac_thue, setSacThue] = useState(searchParams.get('sac_thue') || 'CIT')
   const [questionNumber, setQuestionNumber] = useState(searchParams.get('question_number') || 'Q1')
   const [count, setCount] = useState(1)
-  const [topics, setTopics] = useState('')
+  const [topicsIndustry, setTopicsIndustry] = useState('')
   const [examSession, setExamSession] = useState('')
-  const [industry, setIndustry] = useState('')
   const [difficulty, setDifficulty] = useState('standard')
-  const [modelTier, setModelTier] = useState('fast')
+  const [modelTier, setModelTier] = useState('haiku')
   const [provider, setProvider] = useState('anthropic')
+  const [useAssumedDate, setUseAssumedDate] = useState(false)
+  const [assumedDateText, setAssumedDateText] = useState('')
   const [syllabusCodes, setSyllabusCodes] = useState('')  // simple text input e.g. "CIT-2d, CIT-2n"
   const [customInstructions, setCustomInstructions] = useState('')
   const [showCustom, setShowCustom] = useState(false)
@@ -45,8 +46,8 @@ export default function Generate() {
       const match = data.find((s) => String(s.id) === stored) || data.find((s) => s.is_default)
       if (match) {
         setSessionId(match.id)
-        // Use exam_date if set, otherwise fall back to session name
         setExamSession(match.exam_date || match.name || '')
+        if (match.assumed_date) setAssumedDateText(match.assumed_date)
       }
     }).catch(() => {})
   }, [])
@@ -91,12 +92,15 @@ export default function Generate() {
     setError('')
     setResult(null)
     try {
+      const items = topicsIndustry.split(',').map((s) => s.trim()).filter(Boolean)
+      const assumed_date = useAssumedDate && assumedDateText.trim() ? assumedDateText.trim() : null
       const commonFields = {
         session_id: sessionId || null,
         provider: provider || null,
         syllabus_codes: parseSyllabusCodes(),
         custom_instructions: customInstructions || null,
         reference_question_id: referenceId ? parseInt(referenceId) : null,
+        assumed_date,
       }
       let data
       if (type === 'mcq') {
@@ -104,7 +108,7 @@ export default function Generate() {
           sac_thue,
           count,
           exam_session: examSession,
-          topics: topics ? topics.split(',').map((t) => t.trim()) : null,
+          topics: items.length > 0 ? items : null,
           difficulty,
           model_tier: modelTier,
           ...commonFields,
@@ -115,7 +119,8 @@ export default function Generate() {
           sac_thue: QUESTION_MAP[questionNumber] || sac_thue,
           marks: 10,
           exam_session: examSession,
-          scenario_industry: industry || null,
+          scenario_industry: topicsIndustry || null,
+          topics: items.length > 0 ? items : null,
           model_tier: modelTier,
           ...commonFields,
         })
@@ -125,6 +130,7 @@ export default function Generate() {
           sac_thue: QUESTION_MAP[questionNumber] || sac_thue,
           marks: 15,
           exam_session: examSession,
+          topics: items.length > 0 ? items : null,
           model_tier: modelTier,
           ...commonFields,
         })
@@ -160,30 +166,16 @@ export default function Generate() {
     <div className="max-w-4xl">
       <h2 className="text-2xl font-bold mb-6">Generate Questions</h2>
 
-      {/* Session selector */}
-      <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-4 py-2 mb-5 border">
-        <span className="text-sm text-gray-500 shrink-0">Session:</span>
-        <select
-          value={sessionId || ''}
-          onChange={(e) => {
-            const id = parseInt(e.target.value)
-            setSessionId(id)
-            const s = sessions.find((x) => x.id === id)
-            if (s) setExamSession(s.exam_date || s.name || '')
-          }}
-          className="text-sm border-0 bg-transparent flex-1 focus:outline-none"
-        >
-          <option value="">— Select session —</option>
-          {sessions.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}{s.is_default ? ' (active)' : ''}</option>
-          ))}
-        </select>
-        {currentSession && (
-          <span className="text-xs text-gray-400 shrink-0">
-            {currentSession.file_count || 0} files loaded
-          </span>
-        )}
-      </div>
+      {/* Active session badge */}
+      {currentSession && (
+        <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-4 py-2 mb-5 border text-sm text-gray-600">
+          <span className="text-gray-400">Active session:</span>
+          <strong>{currentSession.name}</strong>
+          {currentSession.exam_date && <span className="text-gray-400">({currentSession.exam_date})</span>}
+          <span className="text-xs text-gray-400 ml-1">· {currentSession.file_count || 0} files</span>
+          <a href="/sessions" className="ml-auto text-xs text-brand-600 hover:underline">Change →</a>
+        </div>
+      )}
       {currentSession?.cutoff_date && (() => {
         const yearMatch = currentSession.cutoff_date.match(/20\d{2}/)
         const taxYear = yearMatch ? yearMatch[0] : ''
@@ -191,9 +183,6 @@ export default function Generate() {
           <div className="flex items-center gap-3 text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-4 py-2 mb-4">
             {taxYear && <span>Tax year: <strong className="text-blue-700">{taxYear}</strong></span>}
             <span>Cut-off: <strong className="text-blue-700">{currentSession.cutoff_date}</strong></span>
-            {currentSession.assumed_date && (
-              <span>Assumed today: <strong className="text-blue-700">{currentSession.assumed_date}</strong></span>
-            )}
           </div>
         )
       })()}
@@ -246,12 +235,6 @@ export default function Generate() {
                     className="w-full border rounded-lg px-3 py-2" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Topics (comma-separated, optional)</label>
-                  <input value={topics} onChange={(e) => setTopics(e.target.value)}
-                    placeholder="e.g. deductible expenses, depreciation"
-                    className="w-full border rounded-lg px-3 py-2" />
-                </div>
-                <div>
                   <label className="block text-sm font-medium mb-1">Difficulty</label>
                   <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}
                     className="w-full border rounded-lg px-3 py-2">
@@ -263,26 +246,18 @@ export default function Generate() {
             )}
 
             {type === 'scenario' && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Question Number</label>
-                  <select value={questionNumber} onChange={(e) => {
-                    setQuestionNumber(e.target.value)
-                    setSacThue(QUESTION_MAP[e.target.value])
-                  }} className="w-full border rounded-lg px-3 py-2">
-                    <option value="Q1">Q1 — CIT</option>
-                    <option value="Q2">Q2 — PIT</option>
-                    <option value="Q3">Q3 — FCT</option>
-                    <option value="Q4">Q4 — VAT</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Industry (optional)</label>
-                  <input value={industry} onChange={(e) => setIndustry(e.target.value)}
-                    placeholder="e.g. manufacturing, services"
-                    className="w-full border rounded-lg px-3 py-2" />
-                </div>
-              </>
+              <div>
+                <label className="block text-sm font-medium mb-1">Question Number</label>
+                <select value={questionNumber} onChange={(e) => {
+                  setQuestionNumber(e.target.value)
+                  setSacThue(QUESTION_MAP[e.target.value])
+                }} className="w-full border rounded-lg px-3 py-2">
+                  <option value="Q1">Q1 — CIT</option>
+                  <option value="Q2">Q2 — PIT</option>
+                  <option value="Q3">Q3 — FCT</option>
+                  <option value="Q4">Q4 — VAT</option>
+                </select>
+              </div>
             )}
 
             {type === 'longform' && (
@@ -306,8 +281,8 @@ export default function Generate() {
                 setModelTier(t)
               }} className="w-full border rounded-lg px-3 py-2">
                 <optgroup label="── Anthropic ──">
-                  <option value="anthropic|haiku">Anthropic — Haiku 4.5 (nhanh/rẻ)</option>
-                  <option value="anthropic|fast">Anthropic — Sonnet 4.6 ⭐ Default</option>
+                  <option value="anthropic|haiku">Anthropic — Haiku 4.5 ⭐ Default (nhanh/rẻ)</option>
+                  <option value="anthropic|fast">Anthropic — Sonnet 4.6</option>
                   <option value="anthropic|strong">Anthropic — Opus 4.6 (mạnh nhất)</option>
                 </optgroup>
                 <optgroup label="── Claudible ──">
@@ -322,6 +297,19 @@ export default function Generate() {
               </select>
             </div>
 
+            <div className="col-span-2">
+              <label className="block text-sm font-medium mb-1">
+                Topics / Industry <span className="text-gray-400 font-normal">(optional, comma-separated)</span>
+              </label>
+              <input
+                value={topicsIndustry}
+                onChange={(e) => setTopicsIndustry(e.target.value)}
+                placeholder="e.g. depreciation, loss carry-forward, manufacturing, real estate"
+                className="w-full border rounded-lg px-3 py-2"
+              />
+              <p className="text-xs text-gray-400 mt-1">Topics to focus on, and/or company industry for the scenario</p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium mb-1">Syllabus Codes (optional)</label>
               <input
@@ -333,6 +321,29 @@ export default function Generate() {
               <p className="text-xs text-gray-400 mt-1">
                 Comma-separated. Question(s) will target these specific syllabus items.
               </p>
+            </div>
+
+            <div className="col-span-2 flex items-start gap-3 pt-1">
+              <input
+                type="checkbox"
+                id="useAssumedDate"
+                checked={useAssumedDate}
+                onChange={(e) => setUseAssumedDate(e.target.checked)}
+                className="mt-1 shrink-0"
+              />
+              <div className="flex-1">
+                <label htmlFor="useAssumedDate" className="block text-sm font-medium cursor-pointer">
+                  Include "Assume today is..." line in scenario
+                </label>
+                {useAssumedDate && (
+                  <input
+                    value={assumedDateText}
+                    onChange={(e) => setAssumedDateText(e.target.value)}
+                    placeholder="e.g. 1 February 2026"
+                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm"
+                  />
+                )}
+              </div>
             </div>
           </div>
 

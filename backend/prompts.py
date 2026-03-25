@@ -55,11 +55,7 @@ ANSWER FORMAT RULES:
 - In the correct answer explanation, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — after the regulation reference
 - At the end of each question, list: Syllabus codes tested: [e.g. C2d, C2n]
 
-TIMELINE RULES:
-- All scenarios, transactions, and company data occur in tax year {tax_year}
-- Apply regulations that were effective as of {cutoff_date}
-- Opening line of scenario uses: "You should assume today is {assumed_date}."
-- Do NOT reference events in years after {tax_year} unless asking about future obligations
+{timeline_rules}
 
 OUTPUT FORMAT — return ONLY valid JSON, no markdown, no extra text:
 {{
@@ -103,6 +99,7 @@ STRUCTURE:
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include full marking scheme at the end
 - In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — after the regulation references
+- At the top level, include "syllabus_codes": [list of ALL unique codes tested across all sub-questions]
 
 MARK GRANULARITY RULES:
 - Minimum 0.5 mark per answerable point
@@ -127,11 +124,7 @@ ANSWER FORMAT RULES:
 - Final answer line should be bolded or clearly marked
 - Cite regulation reference on a separate line at the end: "Ref: Article X, Decree Y"
 
-TIMELINE RULES:
-- All scenarios, transactions, and company data occur in tax year {tax_year}
-- Apply regulations that were effective as of {cutoff_date}
-- Opening line of scenario: "You should assume today is {assumed_date}."
-- Do NOT reference events in years after {tax_year} unless asking about future obligations
+{timeline_rules}
 
 TAX RATES:
 {tax_rates}
@@ -153,7 +146,8 @@ Return ONLY valid JSON in this exact format:
   "sac_thue": "{sac_thue}",
   "marks": {marks},
   "exam_session": "{exam_session}",
-  "scenario": "You should assume today is {assumed_date}. All transactions occur in tax year {tax_year}. ...",
+  "syllabus_codes": ["C2d", "C3a"],
+  "scenario": "ABC Co is a Vietnamese manufacturing company. All transactions occur in tax year 2025...",
   "sub_questions": [
     {{
       "label": "(a)",
@@ -189,6 +183,7 @@ STRUCTURE:
 - Each sub-question tests a DIFFERENT aspect of {sac_thue}
 - Include detailed marking scheme showing each individual mark
 - In the marking scheme for each sub-question, include a line: "Syllabus items tested: [list codes and topic names, e.g. C2d: Depreciation of fixed assets]" — after the regulation references
+- At the top level, include "syllabus_codes": [list of ALL unique codes tested across all sub-questions]
 
 MARK GRANULARITY RULES:
 - Minimum 0.5 mark per answerable point
@@ -209,11 +204,7 @@ ANSWER FORMAT RULES:
 - Final answer line should be bolded or clearly marked
 - Cite regulation reference on a separate line at the end: "Ref: Article X, Decree Y"
 
-TIMELINE RULES:
-- All scenarios, transactions, and company data occur in tax year {tax_year}
-- Apply regulations that were effective as of {cutoff_date}
-- Opening line of scenario: "You should assume today is {assumed_date}."
-- Do NOT reference events in years after {tax_year} unless asking about future obligations
+{timeline_rules}
 
 TAX RATES:
 {tax_rates}
@@ -235,7 +226,8 @@ Return ONLY valid JSON in this exact format:
   "sac_thue": "{sac_thue}",
   "marks": {marks},
   "exam_session": "{exam_session}",
-  "scenario": "You should assume today is {assumed_date}. All transactions occur in tax year {tax_year}. ...",
+  "syllabus_codes": ["C2d", "C3a"],
+  "scenario": "ABC Co is a Vietnamese manufacturing company. You should assume today is 1 February 2026. All transactions occur in tax year 2025. ...",
   "sub_questions": [
     {{
       "label": "(a)",
@@ -263,6 +255,19 @@ def build_syllabus_instruction(syllabus_codes: list, codes_from_file: list = Non
         codes_str = ", ".join(syllabus_codes)
         parts.append(f"SYLLABUS CODES TO TARGET: {codes_str}\nThe question(s) MUST test these specific syllabus items.")
     return "\n".join(parts)
+
+
+def build_timeline_block(cutoff_date: str, tax_year: str, assumed_date: str) -> str:
+    lines = ["TIMELINE RULES:"]
+    if tax_year:
+        lines.append(f"- All scenarios and transactions occur in tax year {tax_year}")
+    if cutoff_date:
+        lines.append(f"- Apply regulations effective as of {cutoff_date}")
+    if assumed_date:
+        lines.append(f'- Opening line of scenario: "You should assume today is {assumed_date}."')
+    else:
+        lines.append("- Do NOT include an 'assumed today is' line in the scenario")
+    return "\n".join(lines)
 
 
 def build_difficulty_instruction(difficulty: str, topics: list = None) -> str:

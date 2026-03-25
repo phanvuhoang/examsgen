@@ -1,11 +1,21 @@
 import os
 import shutil
 import logging
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 from backend.database import get_db
 from backend.config import DATA_DIR
+
+
+def format_cutoff(date_str: str) -> str:
+    """Convert ISO date string '2025-12-31' to '31 December 2025'."""
+    try:
+        d = datetime.strptime(date_str, '%Y-%m-%d')
+        return d.strftime('%-d %B %Y')
+    except Exception:
+        return date_str  # pass through non-ISO strings unchanged
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)
@@ -45,12 +55,13 @@ def list_sessions():
 
 @router.post("/")
 def create_session(session: SessionCreate):
+    cutoff = format_cutoff(session.cutoff_date) if session.cutoff_date else None
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO exam_sessions (name, exam_date, assumed_date, cutoff_date)
             VALUES (%s, %s, %s, %s) RETURNING id
-        """, (session.name, session.exam_date, session.assumed_date, session.cutoff_date))
+        """, (session.name, session.exam_date, session.assumed_date, cutoff))
         return {"id": cur.fetchone()[0]}
 
 
@@ -61,6 +72,8 @@ def update_session(session_id: int, session: SessionUpdate):
         updates = {k: v for k, v in session.dict().items() if v is not None}
         if not updates:
             return {"ok": True}
+        if "cutoff_date" in updates:
+            updates["cutoff_date"] = format_cutoff(updates["cutoff_date"])
         set_clause = ", ".join(f"{k} = %s" for k in updates)
         cur.execute(f"UPDATE exam_sessions SET {set_clause} WHERE id = %s",
                     list(updates.values()) + [session_id])

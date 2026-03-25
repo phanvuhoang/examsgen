@@ -48,7 +48,7 @@ export default function Sessions() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editSession, setEditSession] = useState(null)
-  const [form, setForm] = useState({ name: '', exam_date: '', assumed_date: '', cutoff_date: '' })
+  const [form, setForm] = useState({ name: '', exam_date: '', assumed_date: '', cutoff_date: '', _cutoffManuallySet: false })
   const [carryFromId, setCarryFromId] = useState('')
   const [saving, setSaving] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
@@ -74,27 +74,35 @@ export default function Sessions() {
     }
   }, [editSession])
 
+  const deriveCutoff = (name) => {
+    const yearMatch = name.match(/(20\d{2})/)
+    if (!yearMatch) return ''
+    const year = parseInt(yearMatch[1])
+    return `${year - 1}-12-31`
+  }
+
   const handleNew = () => {
     setEditSession(null)
-    setForm({ name: '', exam_date: '', assumed_date: '', cutoff_date: '' })
+    setForm({ name: '', exam_date: '', assumed_date: '', cutoff_date: '', _cutoffManuallySet: false })
     setCarryFromId('')
     setShowForm(true)
   }
 
   const handleEdit = (s) => {
     setEditSession(s)
-    setForm({ name: s.name, exam_date: s.exam_date || '', assumed_date: s.assumed_date || '', cutoff_date: s.cutoff_date || '' })
+    setForm({ name: s.name, exam_date: s.exam_date || '', assumed_date: s.assumed_date || '', cutoff_date: s.cutoff_date || '', _cutoffManuallySet: true })
     setShowForm(true)
   }
 
   const handleSave = async () => {
     if (!form.name.trim()) { alert('Session name is required'); return }
     setSaving(true)
+    const { _cutoffManuallySet, ...formData } = form
     try {
       if (editSession) {
-        await api.updateSession(editSession.id, form)
+        await api.updateSession(editSession.id, formData)
       } else {
-        const res = await api.createSession(form)
+        const res = await api.createSession(formData)
         if (carryFromId) {
           await api.carryForward(res.id, parseInt(carryFromId))
         }
@@ -138,7 +146,14 @@ export default function Sessions() {
               <label className="block text-xs font-medium mb-1">Session Name *</label>
               <input
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) => {
+                  const newName = e.target.value
+                  setForm(prev => ({
+                    ...prev,
+                    name: newName,
+                    cutoff_date: prev._cutoffManuallySet ? prev.cutoff_date : deriveCutoff(newName),
+                  }))
+                }}
                 className="w-full border rounded-lg px-3 py-2 text-sm"
                 placeholder="e.g. June 2026"
               />
@@ -166,12 +181,12 @@ export default function Sessions() {
             <div>
               <label className="block text-xs font-medium mb-1">Cut-off Date</label>
               <input
+                type="date"
                 value={form.cutoff_date}
-                onChange={(e) => setForm({ ...form, cutoff_date: e.target.value })}
+                onChange={(e) => setForm({ ...form, cutoff_date: e.target.value, _cutoffManuallySet: true })}
                 className="w-full border rounded-lg px-3 py-2 text-sm"
-                placeholder="e.g. 31 December 2025"
               />
-              <p className="text-xs text-gray-400 mt-1">Regulations applicable as of this date. Scenarios use this tax year.</p>
+              <p className="text-xs text-gray-400 mt-1">Regulations applicable as of this date. Auto-derived from session name.</p>
             </div>
             {!editSession && sessions.length > 0 && (
               <div className="col-span-2">
