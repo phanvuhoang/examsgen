@@ -28,6 +28,7 @@ export default function Generate() {
   const [sampleExamples, setSampleExamples] = useState([])
   const [selectedExampleId, setSelectedExampleId] = useState(null)
 
+  const [openrouterModels, setOpenrouterModels] = useState([])
   const [sessions, setSessions] = useState([])
   const [sessionId, setSessionId] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -37,6 +38,13 @@ export default function Generate() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [currentContent, setCurrentContent] = useState(null)
+
+  useEffect(() => {
+    fetch('/api/config/models')
+      .then(r => r.json())
+      .then(d => setOpenrouterModels(d.openrouter_models || []))
+      .catch(() => {})
+  }, [])
 
   // Load sessions
   useEffect(() => {
@@ -280,20 +288,28 @@ export default function Generate() {
                 setProvider(p)
                 setModelTier(t)
               }} className="w-full border rounded-lg px-3 py-2">
-                <optgroup label="── Anthropic ──">
+                <optgroup label="Anthropic">
                   <option value="anthropic|haiku">Anthropic — Haiku 4.5 ⭐ Default (nhanh/rẻ)</option>
                   <option value="anthropic|fast">Anthropic — Sonnet 4.6</option>
                   <option value="anthropic|strong">Anthropic — Opus 4.6 (mạnh nhất)</option>
                 </optgroup>
-                <optgroup label="── Claudible ──">
-                  <option value="claudible|haiku">Claudible — Haiku 4.5</option>
-                  <option value="claudible|fast">Claudible — Sonnet 4.6</option>
-                  <option value="claudible|strong">Claudible — Opus 4.6</option>
+                <optgroup label="Claudible (Free)">
+                  <option value="claudible|haiku">Claudible — Haiku 4.5 (free)</option>
                 </optgroup>
-                <optgroup label="── OpenAI ──">
-                  <option value="openai|fast">OpenAI — GPT-4o Mini (fast)</option>
-                  <option value="openai|strong">OpenAI — GPT-4o (strong)</option>
+                <optgroup label="DeepSeek">
+                  <option value="deepseek|strong">DeepSeek — R1 Reasoner ⭐ (tư duy sâu)</option>
                 </optgroup>
+                <optgroup label="OpenAI">
+                  <option value="openai|fast">OpenAI — GPT-4o Mini</option>
+                  <option value="openai|strong">OpenAI — GPT-4o</option>
+                </optgroup>
+                {openrouterModels.length > 0 && (
+                  <optgroup label="OpenRouter">
+                    {openrouterModels.map((m, i) => (
+                      <option key={i} value={`openrouter${i + 1}|strong`}>{m.label}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
 

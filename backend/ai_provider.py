@@ -4,20 +4,20 @@ import json
 import logging
 
 from backend.config import (
-    CLAUDIBLE_BASE_URL, CLAUDIBLE_API_KEY,
-    CLAUDIBLE_MODEL_HAIKU, CLAUDIBLE_MODEL_FAST, CLAUDIBLE_MODEL_STRONG,
+    CLAUDIBLE_BASE_URL, CLAUDIBLE_API_KEY, CLAUDIBLE_MODEL_HAIKU,
     ANTHROPIC_API_KEY,
     ANTHROPIC_MODEL_HAIKU, ANTHROPIC_MODEL_FAST, ANTHROPIC_MODEL_STRONG,
-    OPENAI_API_KEY,
-    OPENAI_MODEL_FAST, OPENAI_MODEL_STRONG,
+    OPENAI_API_KEY, OPENAI_MODEL_FAST, OPENAI_MODEL_STRONG,
+    DEEPSEEK_API_KEY, DEEPSEEK_MODEL,
+    OPENROUTER_API_KEY, OPENROUTER_MODEL1, OPENROUTER_MODEL2, OPENROUTER_MODEL3,
 )
 
 logger = logging.getLogger(__name__)
 
 CLAUDIBLE_TIERS = {
     "haiku":  CLAUDIBLE_MODEL_HAIKU,
-    "fast":   CLAUDIBLE_MODEL_FAST,
-    "strong": CLAUDIBLE_MODEL_STRONG,
+    "fast":   CLAUDIBLE_MODEL_HAIKU,   # fallback to haiku
+    "strong": CLAUDIBLE_MODEL_HAIKU,   # fallback to haiku
 }
 ANTHROPIC_TIERS = {
     "haiku":  ANTHROPIC_MODEL_HAIKU,
@@ -33,11 +33,23 @@ OPENAI_TIERS = {
 
 def _get_providers(model_tier: str, provider: str = None):
     claudible = ("claudible", CLAUDIBLE_BASE_URL, CLAUDIBLE_API_KEY,
-                 CLAUDIBLE_TIERS.get(model_tier, CLAUDIBLE_MODEL_FAST)) if CLAUDIBLE_API_KEY else None
+                 CLAUDIBLE_TIERS.get(model_tier, CLAUDIBLE_MODEL_HAIKU)) if CLAUDIBLE_API_KEY else None
+
     anthropic = ("anthropic", "https://api.anthropic.com/v1", ANTHROPIC_API_KEY,
                  ANTHROPIC_TIERS.get(model_tier, ANTHROPIC_MODEL_FAST)) if ANTHROPIC_API_KEY else None
+
     openai = ("openai", "https://api.openai.com/v1", OPENAI_API_KEY,
               OPENAI_TIERS.get(model_tier, OPENAI_MODEL_FAST)) if OPENAI_API_KEY else None
+
+    deepseek = ("deepseek", "https://api.deepseek.com/v1", DEEPSEEK_API_KEY,
+                DEEPSEEK_MODEL) if DEEPSEEK_API_KEY else None
+
+    openrouter_entries = []
+    for i, model_id in enumerate([OPENROUTER_MODEL1, OPENROUTER_MODEL2, OPENROUTER_MODEL3], 1):
+        if OPENROUTER_API_KEY and model_id:
+            openrouter_entries.append(
+                (f"openrouter{i}", "https://openrouter.ai/api/v1", OPENROUTER_API_KEY, model_id)
+            )
 
     if provider == "claudible":
         return [claudible] if claudible else []
@@ -45,7 +57,15 @@ def _get_providers(model_tier: str, provider: str = None):
         return [anthropic] if anthropic else []
     if provider == "openai":
         return [openai] if openai else []
+    if provider == "deepseek":
+        return [deepseek] if deepseek else []
+    if provider and provider.startswith("openrouter"):
+        idx = int(provider.replace("openrouter", "")) - 1
+        if 0 <= idx < len(openrouter_entries):
+            return [openrouter_entries[idx]]
+        return []
 
+    # Default fallback chain
     return [p for p in [claudible, anthropic] if p]
 
 

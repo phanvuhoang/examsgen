@@ -35,6 +35,17 @@ def health_check():
     return {"status": "ok", "service": "ExamsGen"}
 
 
+@app.get("/api/config/models")
+def get_model_config():
+    """Return available OpenRouter models (only those with env var set)."""
+    from backend.config import OPENROUTER_API_KEY, OPENROUTER_MODEL1, OPENROUTER_MODEL2, OPENROUTER_MODEL3
+    openrouter_models = []
+    for i, model_id in enumerate([OPENROUTER_MODEL1, OPENROUTER_MODEL2, OPENROUTER_MODEL3], 1):
+        if OPENROUTER_API_KEY and model_id:
+            openrouter_models.append({"id": f"openrouter{i}", "model": model_id, "label": model_id.split("/")[-1]})
+    return {"openrouter_models": openrouter_models}
+
+
 @app.on_event("startup")
 def startup():
     logger.info("Initializing database...")
